@@ -31,7 +31,7 @@ public class AbstractBaseIndexStore {
     protected void logNotificationHandlingError(String msg) {
         if (options.isStrictNotificationMode()) {
             // This will cause e.g. query engine to become tainted
-            navigationHelper.notifyFatalListener(msg, new IllegalStateException(msg));
+            navigationHelper.subscriptions.notifyFatalListener(msg, new IllegalStateException(msg));
         } else {
             logger.error(msg);
         }

@@ -28,12 +28,12 @@ import org.eclipse.viatra.query.runtime.base.comprehension.EMFVisitor;
 
 import com.google.common.collect.ImmutableSet;
 
-public abstract class NavigationHelperVisitor extends EMFVisitor {
+public abstract class NavigationHelperVisitor<Surrogate> extends EMFVisitor {
 
     /**
      * A visitor for processing a single change event. Does not traverse the model. Uses all the observed types.
      */
-    public static class ChangeVisitor extends NavigationHelperVisitor {
+    public static class ChangeVisitor<Surrogate> extends NavigationHelperVisitor<Surrogate> {
         // local copies to save actual state, in case visitor has to be saved for later due unresolvable proxies
         private final IndexingLevel wildcardMode;
         private final Map<Object, IndexingLevel> allObservedClasses;
@@ -41,7 +41,7 @@ public abstract class NavigationHelperVisitor extends EMFVisitor {
         private final Map<Object, IndexingLevel> observedFeatures;
         private final Map<Object, Boolean> sampledClasses;
 
-        public ChangeVisitor(NavigationHelperImpl navigationHelper, boolean isInsertion) {
+        public ChangeVisitor(NavigationHelperImpl<Surrogate> navigationHelper, boolean isInsertion) {
             super(navigationHelper, isInsertion, false);
             wildcardMode = navigationHelper.getWildcardLevel();
             allObservedClasses = navigationHelper.getAllObservedClassesInternal(); // new HashSet<EClass>();
@@ -95,7 +95,7 @@ public abstract class NavigationHelperVisitor extends EMFVisitor {
     /**
      * A visitor for a single-pass traversal of the whole model, processing only the given types and inserting them.
      */
-    public static class TraversingVisitor extends NavigationHelperVisitor {
+    public static class TraversingVisitor<Surrogate> extends NavigationHelperVisitor<Surrogate> {
         private final IndexingLevel wildcardMode;
         Map<Object, IndexingLevel> features;
         Map<Object, IndexingLevel> newClasses;
@@ -103,7 +103,7 @@ public abstract class NavigationHelperVisitor extends EMFVisitor {
         Map<Object, IndexingLevel> classObservationMap; // true for a class even if only a supertype is included in classes;
         Map<Object, IndexingLevel> dataTypes;
 
-        public TraversingVisitor(NavigationHelperImpl navigationHelper, Map<Object, IndexingLevel> features, Map<Object, IndexingLevel> newClasses,
+        public TraversingVisitor(NavigationHelperImpl<Surrogate> navigationHelper, Map<Object, IndexingLevel> features, Map<Object, IndexingLevel> newClasses,
                 Map<Object, IndexingLevel> oldClasses, Map<Object, IndexingLevel> dataTypes) {
             super(navigationHelper, true, true);
             wildcardMode = navigationHelper.getWildcardLevel();
@@ -200,15 +200,15 @@ public abstract class NavigationHelperVisitor extends EMFVisitor {
         }
     }
 
-    protected NavigationHelperImpl navigationHelper;
+    protected NavigationHelperImpl<Surrogate> navigationHelper;
     boolean isInsertion;
     boolean descendHierarchy;
     boolean traverseOnlyWellBehavingDerivedFeatures;
-    EMFBaseIndexInstanceStore instanceStore;
+    EMFBaseIndexInstanceStore<Surrogate> instanceStore;
     EMFBaseIndexStatisticsStore statsStore;
-    EMFBaseIndexMetaStore metaStore;
+    EMFBaseIndexMetaStore<Surrogate> metaStore;
 
-    NavigationHelperVisitor(NavigationHelperImpl navigationHelper, boolean isInsertion, boolean descendHierarchy) {
+    NavigationHelperVisitor(NavigationHelperImpl<Surrogate> navigationHelper, boolean isInsertion, boolean descendHierarchy) {
         super(isInsertion /* preOrder iff insertion */);
         this.navigationHelper = navigationHelper;
         instanceStore = navigationHelper.instanceStore;
@@ -301,12 +301,13 @@ public abstract class NavigationHelperVisitor extends EMFVisitor {
         Object internalValueRepresentation = null;
         if (observesFeature(featureKey)) {
             // if (internalValueRepresentation == null) // always true
-            internalValueRepresentation = metaStore.toInternalValueRepresentation(target);
             boolean unique = feature.isUnique();
             if (isInsertion) {
-                instanceStore.insertFeatureTuple(featureKey, unique, internalValueRepresentation, source);
+                internalValueRepresentation = 
+                        instanceStore.insertAttributeTuple(featureKey, unique, target, source);
             } else {
-                instanceStore.removeFeatureTuple(featureKey, unique, internalValueRepresentation, source);
+                internalValueRepresentation = 
+                        instanceStore.removeAttributeTuple(featureKey, unique, target, source);
             }
         }
         if (countsFeature(featureKey)){
@@ -352,9 +353,9 @@ public abstract class NavigationHelperVisitor extends EMFVisitor {
         if (observesFeature(featureKey)) {
             boolean unique = feature.isUnique();
             if (isInsertion) {
-                instanceStore.insertFeatureTuple(featureKey, unique, target, source);
+                instanceStore.insertReferenceTuple(featureKey, unique, target, source);
             } else {
-                instanceStore.removeFeatureTuple(featureKey, unique, target, source);
+                instanceStore.removeReferenceTuple(featureKey, unique, target, source);
             }
         }
         if (countsFeature(featureKey)){
@@ -389,6 +390,7 @@ public abstract class NavigationHelperVisitor extends EMFVisitor {
             if (position != null && reference.isMany() && attemptProxyResolutions(source, reference)) {
                 // there is added value in doing the resolution now, when we know the position
                 // this may save an iteration through the EList if successful
+                @SuppressWarnings("unchecked")
                 EObject touch = ((java.util.List<EObject>) source.eGet(reference, true)).get(position);
                 // if resolution successful, no further action needed
                 if (!touch.eIsProxy())

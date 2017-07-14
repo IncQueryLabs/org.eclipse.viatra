@@ -14,14 +14,15 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
-import java.util.Set;
 import java.util.Map.Entry;
+import java.util.Set;
 
 import org.apache.log4j.Logger;
 import org.eclipse.emf.ecore.EClass;
 import org.eclipse.emf.ecore.EClassifier;
 import org.eclipse.emf.ecore.EObject;
 import org.eclipse.emf.ecore.EStructuralFeature;
+import org.eclipse.viatra.query.runtime.base.api.ISurrogateObjectService;
 
 import com.google.common.collect.HashBasedTable;
 import com.google.common.collect.HashMultiset;
@@ -37,10 +38,17 @@ import com.google.common.collect.Table.Cell;
  * @author Gabor Bergmann
  *
  */
-public class EMFBaseIndexInstanceStore extends AbstractBaseIndexStore {
+public class EMFBaseIndexInstanceStore<Surrogate> extends AbstractBaseIndexStore {
     
-    public EMFBaseIndexInstanceStore(NavigationHelperImpl navigationHelper, Logger logger) {
+    private ISurrogateObjectService<Surrogate> surrogateObjectService;
+    private EMFBaseIndexMetaStore metaStore;
+    private EMFBaseIndexSubscriptions<Surrogate> subscriptions;
+
+    public EMFBaseIndexInstanceStore(NavigationHelperImpl<Surrogate> navigationHelper, Logger logger, ISurrogateObjectService<Surrogate> surrogateObjectService) {
         super(navigationHelper, logger);
+        this.surrogateObjectService = surrogateObjectService;
+        this.metaStore = navigationHelper.metaStore;
+        this.subscriptions = navigationHelper.subscriptions;
     }
 
     /**
@@ -61,22 +69,22 @@ public class EMFBaseIndexInstanceStore extends AbstractBaseIndexStore {
      * Duplicates of non-unique features are stored in this map only; other index structures consider unique values
      * only.
      */
-    private final Table<Object, Object, Collection<EObject>> valueToFeatureToHolderMap = HashBasedTable.create();
+    private final Table<Object, Object, Collection<Surrogate>> valueToFeatureToHolderMap = HashBasedTable.create();
 
     /**
      * feature ((String id or EStructuralFeature) -> holder(s) constructed on-demand
      */
-    private Map<Object, Multiset<EObject>> featureToHolderMap;
+    private Map<Object, Multiset<Surrogate>> featureToHolderMap;
 
     /**
      * holder -> feature (String id or EStructuralFeature) -> value(s) constructed on-demand
      */
-    private Table<EObject, Object, Set<Object>> holderToFeatureToValueMap;
+    private Table<Surrogate, Object, Set<Object>> holderToFeatureToValueMap;
 
     /**
      * key (String id or EClass instance) -> instance(s)
      */
-    private final Map<Object, Set<EObject>> instanceMap = new HashMap<Object, Set<EObject>>();
+    private final Map<Object, Set<Surrogate>> instanceMap = new HashMap<Object, Set<Surrogate>>();
 
     /**
      * key (String id or EDataType instance) -> multiset of value(s)
@@ -88,7 +96,7 @@ public class EMFBaseIndexInstanceStore extends AbstractBaseIndexStore {
     /**
      * @return the valueToFeatureToHolderMap
      */
-    protected Table<Object, Object, Collection<EObject>> getValueToFeatureToHolderMap() {
+    protected Table<Object, Object, Collection<Surrogate>> getValueToFeatureToHolderMap() {
         return valueToFeatureToHolderMap;
     }
 
@@ -99,16 +107,16 @@ public class EMFBaseIndexInstanceStore extends AbstractBaseIndexStore {
      * @return true if this was the first time the value was added to this feature of this holder (false is only
      *         possible for non-unique features)
      */
-    private boolean addToFeatureMap(final Object featureKey, boolean unique, final Object value, final EObject holder) {
-        Collection<EObject> setVal = valueToFeatureToHolderMap.get(value, featureKey);
+    private boolean addToFeatureMap(final Object featureKey, boolean unique, final Object value, final Surrogate holderSurrogate) {
+        Collection<Surrogate> setVal = valueToFeatureToHolderMap.get(value, featureKey);
 
         if (setVal == null) {
-            setVal = unique ? new HashSet<EObject>() : HashMultiset.<EObject> create();
+            setVal = unique ? new HashSet<Surrogate>() : HashMultiset.<Surrogate> create();
             valueToFeatureToHolderMap.put(value, featureKey, setVal);
 
         }
-        boolean changed = unique || !setVal.contains(holder);
-        boolean success = setVal.add(holder);
+        boolean changed = unique || !setVal.contains(holderSurrogate);
+        boolean success = setVal.add(holderSurrogate);
         if (unique && !success) {
             String msg = String.format("Error adding feature %s to the index with type %s. This indicates some errors in underlying model representation.", value, featureKey);
             logNotificationHandlingError(msg);
@@ -119,25 +127,25 @@ public class EMFBaseIndexInstanceStore extends AbstractBaseIndexStore {
     /**
      * This method uses either the original {@link EStructuralFeature} instance or the String id.
      */
-    private void addToReversedFeatureMap(final Object feature, final EObject holder) {
-        Multiset<EObject> setVal = featureToHolderMap.get(feature);
+    private void addToReversedFeatureMap(final Object feature, final Surrogate holderSurrogate) {
+        Multiset<Surrogate> setVal = featureToHolderMap.get(feature);
 
         if (setVal == null) {
             setVal = HashMultiset.create();
             featureToHolderMap.put(feature, setVal);
         }
-        setVal.add(holder);
+        setVal.add(holderSurrogate);
     }
 
     /**
      * This method uses either the original {@link EStructuralFeature} instance or the String id.
      */
-    private void addToDirectFeatureMap(final EObject holder, final Object feature, final Object value) {
-        Set<Object> setVal = holderToFeatureToValueMap.get(holder, feature);
+    private void addToDirectFeatureMap(final Surrogate holderSurrogate, final Object feature, final Object value) {
+        Set<Object> setVal = holderToFeatureToValueMap.get(holderSurrogate, feature);
 
         if (setVal == null) {
             setVal = new HashSet<Object>();
-            holderToFeatureToValueMap.put(holder, feature, setVal);
+            holderToFeatureToValueMap.put(holderSurrogate, feature, setVal);
         }
         setVal.add(value);
     }
@@ -145,10 +153,10 @@ public class EMFBaseIndexInstanceStore extends AbstractBaseIndexStore {
     /**
      * This method uses either the original {@link EStructuralFeature} instance or the String id.
      */
-    private void removeFromReversedFeatureMap(final Object feature, final EObject holder) {
-        final Multiset<EObject> setVal = featureToHolderMap.get(feature);
+    private void removeFromReversedFeatureMap(final Object feature, final Surrogate holderSurrogate) {
+        final Multiset<Surrogate> setVal = featureToHolderMap.get(feature);
         if (setVal != null) {
-            setVal.remove(holder);
+            setVal.remove(holderSurrogate);
 
             if (setVal.isEmpty()) {
                 featureToHolderMap.remove(feature);
@@ -160,19 +168,19 @@ public class EMFBaseIndexInstanceStore extends AbstractBaseIndexStore {
      * This method uses the original {@link EStructuralFeature} instance.
      */
     private boolean removeFromFeatureMap(final Object featureKey, boolean unique, final Object value,
-            final EObject holder) {
-        final Collection<EObject> setHolder = valueToFeatureToHolderMap.get(value, featureKey);
+            final Surrogate holderSurrogate) {
+        final Collection<Surrogate> setHolder = valueToFeatureToHolderMap.get(value, featureKey);
         if (setHolder != null) {
-            boolean removed = setHolder.remove(holder);
+            boolean removed = setHolder.remove(holderSurrogate);
 
             if (setHolder.isEmpty()) {
                 valueToFeatureToHolderMap.remove(value, featureKey);
             }
             if (!removed) {
-                String msg = String.format("Notification received to remove value %s from feature %s of object %s, but feature value is missing from the index. This indicates some errors in underlying model representation.", value, featureKey, holder);
+                String msg = String.format("Notification received to remove value %s from feature %s of object %s, but feature value is missing from the index. This indicates some errors in underlying model representation.", value, featureKey, holderSurrogate);
                 logNotificationHandlingError(msg);
             }
-            return removed && (unique || (!setHolder.contains(holder)));
+            return removed && (unique || (!setHolder.contains(holderSurrogate)));
         }
         return false;
     }
@@ -180,49 +188,101 @@ public class EMFBaseIndexInstanceStore extends AbstractBaseIndexStore {
     /**
      * This method uses either the original {@link EStructuralFeature} instance or the String id.
      */
-    private void removeFromDirectFeatureMap(final EObject holder, final Object feature, final Object value) {
-        final Set<Object> setVal = holderToFeatureToValueMap.get(holder, feature);
+    private void removeFromDirectFeatureMap(final Surrogate holderSurrogate, final Object feature, final Object value) {
+        final Set<Object> setVal = holderToFeatureToValueMap.get(holderSurrogate, feature);
         if (setVal != null) {
             setVal.remove(value);
 
             if (setVal.isEmpty()) {
-                holderToFeatureToValueMap.remove(holder, feature);
+                holderToFeatureToValueMap.remove(holderSurrogate, feature);
             }
         }
     }
+   
+    public void insertReferenceTuple(final Object featureKey, boolean unique, final EObject value, final EObject holder) {
+        Surrogate valueSurrogate = surrogateObjectService.getAndPinSurrogate(value);
+        Surrogate holderSurrogate = surrogateObjectService.getAndPinSurrogate(holder);
+        boolean changed = insertFeatureTuple(featureKey, unique, valueSurrogate, holderSurrogate);
+        if (changed) {
+            subscriptions.notifyFeatureListeners(holder, featureKey, value, true);
+            subscriptions.notifyFeatureSurrogateListeners(holderSurrogate, featureKey, valueSurrogate, true);
+        }
+    }
+    /**
+     * @param value external representation
+     * @return internal representation of value
+     */
+    public Object insertAttributeTuple(final Object featureKey, boolean unique, final Object value, final EObject holder) {
+        Object internalValueRepresentation = metaStore.toInternalValueRepresentation(value);
+        Surrogate holderSurrogate = surrogateObjectService.getAndPinSurrogate(holder);
+        boolean changed = insertFeatureTuple(featureKey, unique, internalValueRepresentation, holderSurrogate);
+        if (changed) {
+            subscriptions.notifyFeatureListeners(holder, featureKey, value, true);
+            subscriptions.notifyFeatureSurrogateListeners(holderSurrogate, featureKey, value, true);
+        }
+        return internalValueRepresentation;
+    }
+    public void removeReferenceTuple(final Object featureKey, boolean unique, final EObject value, final EObject holder) {
+        Surrogate valueSurrogate = surrogateObjectService.getAndUnpinExistingSurrogate(value);
+        Surrogate holderSurrogate = surrogateObjectService.getAndUnpinExistingSurrogate(holder);
+        boolean changed = removeFeatureTuple(featureKey, unique, valueSurrogate, holderSurrogate);
+        if (changed) {
+            subscriptions.notifyFeatureListeners(holder, featureKey, value, false);
+            subscriptions.notifyFeatureSurrogateListeners(holderSurrogate, featureKey, valueSurrogate, false);
+        }
+    }
+    /**
+     * @param value external representation
+     * @return internal representation of value
+     */
+    public Object removeAttributeTuple(final Object featureKey, boolean unique, final Object value, final EObject holder) {
+        Object internalValueRepresentation = metaStore.toInternalValueRepresentation(value);
+        Surrogate holderSurrogate = surrogateObjectService.getAndUnpinExistingSurrogate(holder);
+        boolean changed = removeFeatureTuple(featureKey, unique, internalValueRepresentation, holderSurrogate);
+        if (changed) {
+            subscriptions.notifyFeatureListeners(holder, featureKey, value, false);
+            subscriptions.notifyFeatureSurrogateListeners(holderSurrogate, featureKey, value, false);
+        }
+        return internalValueRepresentation;
+    }
 
-    public void insertFeatureTuple(final Object featureKey, boolean unique, final Object value, final EObject holder) {
-        boolean changed = addToFeatureMap(featureKey, unique, value, holder);
+
+    private boolean insertFeatureTuple(final Object featureKey, boolean unique, final Object value, final Surrogate holderSurrogate) {
+        boolean changed = addToFeatureMap(featureKey, unique, value, holderSurrogate);
         if (changed) { // if not duplicated
             if (featureToHolderMap != null) {
-                addToReversedFeatureMap(featureKey, holder);
+                addToReversedFeatureMap(featureKey, holderSurrogate);
             }
             if (holderToFeatureToValueMap != null) {
-                addToDirectFeatureMap(holder, featureKey, value);
+                addToDirectFeatureMap(holderSurrogate, featureKey, value);
             }
 
             isDirty = true;
-            navigationHelper.notifyFeatureListeners(holder, featureKey, value, true);
         }
+        return changed;
     }
 
-    public void removeFeatureTuple(final Object featureKey, boolean unique, final Object value, final EObject holder) {
-        boolean changed = removeFromFeatureMap(featureKey, unique, value, holder);
+    private boolean removeFeatureTuple(final Object featureKey, boolean unique, final Object value, final Surrogate holderSurrogate) {
+        boolean changed = removeFromFeatureMap(featureKey, unique, value, holderSurrogate);
         if (changed) { // if not duplicated
             if (featureToHolderMap != null) {
-                removeFromReversedFeatureMap(featureKey, holder);
+                removeFromReversedFeatureMap(featureKey, holderSurrogate);
             }
             if (holderToFeatureToValueMap != null) {
-                removeFromDirectFeatureMap(holder, featureKey, value);
+                removeFromDirectFeatureMap(holderSurrogate, featureKey, value);
             }
 
             isDirty = true;
-            navigationHelper.notifyFeatureListeners(holder, featureKey, value, false);
         }
-    }
+        return changed;
+   }
 
     // START ********* InstanceSet *********
     public Set<EObject> getInstanceSet(final Object keyClass) {
+        return surrogateObjectService.fromExistingSurrogateSet(instanceMap.get(keyClass));
+    }
+
+    public Set<Surrogate> getSurrogateInstanceSet(final Object keyClass) {
         return instanceMap.get(keyClass);
     }
 
@@ -231,25 +291,27 @@ public class EMFBaseIndexInstanceStore extends AbstractBaseIndexStore {
     }
 
     public void insertIntoInstanceSet(final Object keyClass, final EObject value) {
-        Set<EObject> set = instanceMap.get(keyClass);
+        Surrogate valueSurrogate = surrogateObjectService.getAndPinSurrogate(value);
+        Set<Surrogate> set = instanceMap.get(keyClass);
         if (set == null) {
-            set = new HashSet<EObject>();
+            set = new HashSet<Surrogate>();
             instanceMap.put(keyClass, set);
         }
         
-        if (!set.add(value)) {
+        if (!set.add(valueSurrogate)) {
             String msg = String.format("Notification received to index %s as a %s, but it already exists in the index. This indicates some errors in underlying model representation.", value, keyClass);
             logNotificationHandlingError(msg);
         }
 
         isDirty = true;
-        navigationHelper.notifyInstanceListeners(keyClass, value, true);
+        subscriptions.notifyInstanceSurrogateListeners(keyClass, valueSurrogate, true);
     }
 
     public void removeFromInstanceSet(final Object keyClass, final EObject value) {
-        final Set<EObject> set = instanceMap.get(keyClass);
+        Surrogate valueSurrogate = surrogateObjectService.getAndUnpinExistingSurrogate(value);
+        final Set<Surrogate> set = instanceMap.get(keyClass);
         if (set != null) {
-            if(!set.remove(value)) {
+            if(!set.remove(valueSurrogate)) {
                 String msg = String.format("Notification received to remove %s as a %s, but it is missing from the index. This indicates some errors in underlying model representation.", value, keyClass);
                 logNotificationHandlingError(msg);
             }
@@ -260,7 +322,7 @@ public class EMFBaseIndexInstanceStore extends AbstractBaseIndexStore {
         }
 
         isDirty = true;
-        navigationHelper.notifyInstanceListeners(keyClass, value, false);
+        subscriptions.notifyInstanceSurrogateListeners(keyClass, valueSurrogate, false);
     }
 
     // END ********* InstanceSet *********
@@ -274,7 +336,10 @@ public class EMFBaseIndexInstanceStore extends AbstractBaseIndexStore {
         dataTypeMap.remove(keyType);
     }
 
-    public void insertIntoDataTypeMap(final Object keyType, final Object value) {
+    /**
+     * @param value internal representation of value
+     */
+   public void insertIntoDataTypeMap(final Object keyType, final Object value) {
         Map<Object, Integer> valMap = dataTypeMap.get(keyType);
         if (valMap == null) {
             valMap = new HashMap<Object, Integer>();
@@ -289,9 +354,12 @@ public class EMFBaseIndexInstanceStore extends AbstractBaseIndexStore {
         }
 
         isDirty = true;
-        navigationHelper.notifyDataTypeListeners(keyType, value, true, firstOccurrence);
+        subscriptions.notifyDataTypeListeners(keyType, value, true, firstOccurrence);
     }
 
+   /**
+    * @param value internal representation of value
+    */
     public void removeFromDataTypeMap(final Object keyType, final Object value) {
         final Map<Object, Integer> valMap = dataTypeMap.get(keyType);
         if (valMap != null && valMap.get(value) != null) {
@@ -307,7 +375,7 @@ public class EMFBaseIndexInstanceStore extends AbstractBaseIndexStore {
             }
 
             isDirty = true;
-            navigationHelper.notifyDataTypeListeners(keyType, value, false, lastOccurrence);
+            subscriptions.notifyDataTypeListeners(keyType, value, false, lastOccurrence);
         }
         // else: inconsistent deletion? log error?
     }
@@ -318,11 +386,17 @@ public class EMFBaseIndexInstanceStore extends AbstractBaseIndexStore {
     /**
      * Decodes the collection of holders (potentially non-unique) to a unique set
      */
-    protected static Set<EObject> holderCollectionToUniqueSet(Collection<EObject> holders) {
+    protected Set<EObject> holderCollectionToUniqueSet(Collection<Surrogate> holders) {
+        return surrogateObjectService.fromExistingSurrogateSet(holderCollectionToUniqueSurrogateSet(holders));
+    }
+    /**
+     * Decodes the collection of holders (potentially non-unique) to a unique set of surrogates
+     */
+    protected Set<Surrogate> holderCollectionToUniqueSurrogateSet(Collection<Surrogate> holders) {
         if (holders instanceof Set<?>) {
-            return (Set<EObject>) holders;
+            return (Set<Surrogate>) holders;
         } else if (holders instanceof Multiset<?>) {
-            Multiset<EObject> multiSet = (Multiset<EObject>) holders;
+            Multiset<Surrogate> multiSet = (Multiset<Surrogate>) holders;
             return multiSet.elementSet();
         } else
             throw new IllegalStateException("Neither Set nor Multiset: " + holders);
@@ -331,15 +405,15 @@ public class EMFBaseIndexInstanceStore extends AbstractBaseIndexStore {
     /**
      * @return the featureToHolderMap
      */
-    protected Map<Object, Multiset<EObject>> getFeatureToHolderMap() {
+    protected Map<Object, Multiset<Surrogate>> getFeatureToHolderMap() {
         if (featureToHolderMap == null) {
-            featureToHolderMap = new HashMap<Object, Multiset<EObject>>();
+            featureToHolderMap = new HashMap<Object, Multiset<Surrogate>>();
             initReversedFeatureMap();
         }
         return featureToHolderMap;
     }
 
-    protected Map<Object, Multiset<EObject>> peekFeatureToHolderMap() {
+    protected Map<Object, Multiset<Surrogate>> peekFeatureToHolderMap() {
         return featureToHolderMap;
     }
 
@@ -348,7 +422,7 @@ public class EMFBaseIndexInstanceStore extends AbstractBaseIndexStore {
      * 
      * @return the holderToFeatureToValeMap
      */
-    protected Table<EObject, Object, Set<Object>> getHolderToFeatureToValueMap() {
+    protected Table<Surrogate, Object, Set<Object>> getHolderToFeatureToValueMap() {
         if (holderToFeatureToValueMap == null) {
             holderToFeatureToValueMap = HashBasedTable.create();
             initDirectFeatureMap();
@@ -356,24 +430,24 @@ public class EMFBaseIndexInstanceStore extends AbstractBaseIndexStore {
         return holderToFeatureToValueMap;
     }
 
-    protected Table<EObject, Object, Set<Object>> peekHolderToFeatureToValueMap() {
+    protected Table<Surrogate, Object, Set<Object>> peekHolderToFeatureToValueMap() {
         return holderToFeatureToValueMap;
     }
     
     private void initReversedFeatureMap() {
-        for (final Cell<Object, Object, Collection<EObject>> entry : valueToFeatureToHolderMap.cellSet()) {
+        for (final Cell<Object, Object, Collection<Surrogate>> entry : valueToFeatureToHolderMap.cellSet()) {
             final Object feature = entry.getColumnKey();
-            for (final EObject holder : holderCollectionToUniqueSet(entry.getValue())) {
+            for (final Surrogate holder : holderCollectionToUniqueSurrogateSet(entry.getValue())) {
                 addToReversedFeatureMap(feature, holder);
             }
         }
     }
 
     private void initDirectFeatureMap() {
-        for (final Cell<Object, Object, Collection<EObject>> entry : valueToFeatureToHolderMap.cellSet()) {
+        for (final Cell<Object, Object, Collection<Surrogate>> entry : valueToFeatureToHolderMap.cellSet()) {
             final Object value = entry.getRowKey();
             final Object feature = entry.getColumnKey();
-            for (final EObject holder : holderCollectionToUniqueSet(entry.getValue())) {
+            for (final Surrogate holder : holderCollectionToUniqueSurrogateSet(entry.getValue())) {
                 addToDirectFeatureMap(holder, feature, value);
             }
         }
@@ -392,7 +466,7 @@ public class EMFBaseIndexInstanceStore extends AbstractBaseIndexStore {
         final Set<EClass> result = Sets.newHashSet();
         final Set<Object> classifierKeys = instanceMap.keySet();
         for (final Object classifierKey : classifierKeys) {
-            final EClassifier knownClassifier = navigationHelper.metaStore.getKnownClassifierForKey(classifierKey);
+            final EClassifier knownClassifier = metaStore.getKnownClassifierForKey(classifierKey);
             if (knownClassifier instanceof EClass) {
                 result.add((EClass) knownClassifier);
             }
@@ -400,12 +474,12 @@ public class EMFBaseIndexInstanceStore extends AbstractBaseIndexStore {
         return result;
     }
 
-    Set<Object> getOldValuesForHolderAndFeature(EObject source, EStructuralFeature feature) {
+    Set<Object> getOldValuesForHolderAndFeature(Surrogate source, EStructuralFeature feature) {
         // while this is slower than using the holderToFeatureToValueMap, we do not want to construct that to avoid
         // memory overhead
-        Map<Object, Collection<EObject>> oldValuesToHolders = valueToFeatureToHolderMap.column(feature);
+        Map<Object, Collection<Surrogate>> oldValuesToHolders = valueToFeatureToHolderMap.column(feature);
         Set<Object> oldValues = new HashSet<Object>();
-        for (Entry<Object, Collection<EObject>> entry : oldValuesToHolders.entrySet()) {
+        for (Entry<Object, Collection<Surrogate>> entry : oldValuesToHolders.entrySet()) {
             if (entry.getValue().contains(source)) {
                 oldValues.add(entry.getKey());
             }

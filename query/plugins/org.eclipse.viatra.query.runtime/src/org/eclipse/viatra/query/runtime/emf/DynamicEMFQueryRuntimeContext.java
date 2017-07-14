@@ -11,7 +11,7 @@
 package org.eclipse.viatra.query.runtime.emf;
 
 import org.apache.log4j.Logger;
-import org.eclipse.viatra.query.runtime.base.api.NavigationHelper;
+import org.eclipse.viatra.query.runtime.base.api.IEMFBaseIndex;
 import org.eclipse.viatra.query.runtime.matchers.tuple.Tuple;
 import org.eclipse.viatra.query.runtime.matchers.tuple.Tuples;
 
@@ -23,11 +23,16 @@ import org.eclipse.viatra.query.runtime.matchers.tuple.Tuples;
  * 	{@link #unwrapElement(Object)} and {@link #unwrapTuple(Object)} remain NOPs.
  * 
  * @author Bergmann Gabor
+ * @noextend This class is not intended to be subclassed by clients.
+ * @noinstantiate This class is not intended to be instantiated by clients.
  *
  */
-public class DynamicEMFQueryRuntimeContext extends EMFQueryRuntimeContext {
+public class DynamicEMFQueryRuntimeContext<Surrogate> extends EMFQueryRuntimeContext<Surrogate> {
 
-    public DynamicEMFQueryRuntimeContext(NavigationHelper baseIndex, Logger logger, EMFScope emfScope) {
+    /**
+     * @since 1.7
+     */
+    public DynamicEMFQueryRuntimeContext(IEMFBaseIndex<Surrogate> baseIndex, Logger logger, EMFScope emfScope) {
         super(baseIndex, logger, emfScope);
     }	
     

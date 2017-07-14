@@ -68,8 +68,7 @@ public class SimpleStateCoder implements IStateCoder {
         try {
             EMFScope scope = new EMFScope(notifier);
             ViatraQueryEngine queryEngine = ViatraQueryEngine.on(scope);
-            EMFBaseIndexWrapper baseIndex = (EMFBaseIndexWrapper) queryEngine.getBaseIndex();
-            navigationHelper = baseIndex.getNavigationHelper();
+            navigationHelper = EMFScope.extractUnderlyingEMFIndex(queryEngine);
             navigationHelper.registerObservedTypes(classes, null, features, IndexingLevel.FULL);
         } catch (ViatraQueryException e) {
             throw new DSEException(e);

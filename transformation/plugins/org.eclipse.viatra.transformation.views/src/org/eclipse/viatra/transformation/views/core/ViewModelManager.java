@@ -22,6 +22,7 @@ import org.eclipse.emf.ecore.resource.ResourceSet;
 import org.eclipse.emf.ecore.resource.impl.ResourceSetImpl;
 import org.eclipse.emf.ecore.util.EcoreUtil;
 import org.eclipse.viatra.query.runtime.api.ViatraQueryEngine;
+import org.eclipse.viatra.query.runtime.base.api.IEMFBaseIndex;
 import org.eclipse.viatra.query.runtime.base.api.NavigationHelper;
 import org.eclipse.viatra.query.runtime.base.exception.ViatraBaseException;
 import org.eclipse.viatra.query.runtime.emf.EMFScope;
@@ -127,7 +128,7 @@ public class ViewModelManager {
     private Resource addTraceabilityResource() throws ViatraQueryException, ViatraBaseException {
         ResourceSet resourceSet = new ResourceSetImpl();
         Resource resource = resourceSet.createResource(URI.createURI(getTraceabilityResourceId()));
-        NavigationHelper helper = EMFScope.extractUnderlyingEMFIndex(engine);
+        IEMFBaseIndex<?> helper = EMFScope.extractUnderlyingEMFBaseIndex(engine);
         helper.addRoot(resourceSet);
         
         return resource;

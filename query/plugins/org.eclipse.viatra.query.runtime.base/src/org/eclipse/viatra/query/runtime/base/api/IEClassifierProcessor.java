@@ -24,4 +24,8 @@ public interface IEClassifierProcessor<ClassType, InstanceType> {
     
     public interface IEClassProcessor extends IEClassifierProcessor<EClass, EObject>{}
     public interface IEDataTypeProcessor extends IEClassifierProcessor<EDataType, Object>{}
+    /**
+     * @since 1.7
+     */
+    public interface IEClassSurrogateProcessor<Surrogate> extends IEClassifierProcessor<EClass, Surrogate>{}
 }

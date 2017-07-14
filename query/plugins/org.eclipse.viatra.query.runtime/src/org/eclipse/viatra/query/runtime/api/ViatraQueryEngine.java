@@ -104,7 +104,7 @@ public abstract class ViatraQueryEngine {
      * contents of the model.
      * 
      * <p>If using an {@link EMFScope}, 
-     *  consider {@link EMFScope#extractUnderlyingEMFIndex(ViatraQueryEngine)} instead to access EMF-specific details.
+     *  consider {@link EMFScope#extractUnderlyingEMFBaseIndex(ViatraQueryEngine)} instead to access EMF-specific details.
      * 
      * @return the baseIndex the NavigationHelper maintaining the base index
      * @throws ViatraQueryException

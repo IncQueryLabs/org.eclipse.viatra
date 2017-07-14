@@ -10,15 +10,11 @@
  *******************************************************************************/
 package org.eclipse.viatra.query.runtime.base.core;
 
-import static com.google.common.base.Preconditions.checkArgument;
-
 import java.lang.reflect.InvocationTargetException;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -48,12 +44,19 @@ import org.eclipse.viatra.query.runtime.base.api.BaseIndexOptions;
 import org.eclipse.viatra.query.runtime.base.api.DataTypeListener;
 import org.eclipse.viatra.query.runtime.base.api.EMFBaseIndexChangeListener;
 import org.eclipse.viatra.query.runtime.base.api.FeatureListener;
+import org.eclipse.viatra.query.runtime.base.api.FeatureSurrogateListener;
+import org.eclipse.viatra.query.runtime.base.api.IEMFBaseIndex;
 import org.eclipse.viatra.query.runtime.base.api.IEClassifierProcessor.IEClassProcessor;
+import org.eclipse.viatra.query.runtime.base.api.IEClassifierProcessor.IEClassSurrogateProcessor;
 import org.eclipse.viatra.query.runtime.base.api.IEClassifierProcessor.IEDataTypeProcessor;
 import org.eclipse.viatra.query.runtime.base.api.IEMFIndexingErrorListener;
 import org.eclipse.viatra.query.runtime.base.api.IEStructuralFeatureProcessor;
+import org.eclipse.viatra.query.runtime.base.api.IEStructuralFeatureSurrogateProcessor;
+import org.eclipse.viatra.query.runtime.base.api.ISurrogateObjectService;
+import org.eclipse.viatra.query.runtime.base.api.ISurrogateServiceFactory;
 import org.eclipse.viatra.query.runtime.base.api.IndexingLevel;
 import org.eclipse.viatra.query.runtime.base.api.InstanceListener;
+import org.eclipse.viatra.query.runtime.base.api.InstanceSurrogateListener;
 import org.eclipse.viatra.query.runtime.base.api.LightweightEObjectObserver;
 import org.eclipse.viatra.query.runtime.base.api.NavigationHelper;
 import org.eclipse.viatra.query.runtime.base.api.filters.IBaseIndexObjectFilter;
@@ -64,7 +67,6 @@ import org.eclipse.viatra.query.runtime.base.exception.ViatraBaseException;
 
 import com.google.common.base.Function;
 import com.google.common.base.Objects;
-import com.google.common.collect.HashBasedTable;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.LinkedHashMultimap;
 import com.google.common.collect.Maps;
@@ -73,7 +75,7 @@ import com.google.common.collect.Multiset;
 import com.google.common.collect.Sets;
 import com.google.common.collect.Table;
 
-public class NavigationHelperImpl implements NavigationHelper {
+public class NavigationHelperImpl<Surrogate> implements NavigationHelper, IEMFBaseIndex<Surrogate> {
 
     /**
      * This is never null.
@@ -126,36 +128,16 @@ public class NavigationHelperImpl implements NavigationHelper {
     
     protected Queue<Runnable> traversalCallbacks = new LinkedList<Runnable>();
 
-    /**
-     * These global listeners will be called after updates.
-     */
-    // private final Set<Runnable> afterUpdateCallbacks;
-    private final Set<EMFBaseIndexChangeListener> baseIndexChangeListeners;
-    private final Map<LightweightEObjectObserver, Collection<EObject>> lightweightObservers;
-
-    // These are the user subscriptions to notifications
-    private final Map<InstanceListener, Set<EClass>> subscribedInstanceListeners;
-    private final Map<FeatureListener, Set<EStructuralFeature>> subscribedFeatureListeners;
-    private final Map<DataTypeListener, Set<EDataType>> subscribedDataTypeListeners;
-
-    // these are the internal notification tables
-    // (element Type or String id) -> listener -> (subscription types)
-    // if null, must be recomputed from subscriptions
-    // potentially multiple subscription types for each element type because (a) nsURI collisions, (b) multiple
-    // supertypes
-    private Table<Object, InstanceListener, Set<EClass>> instanceListeners;
-    private Table<Object, FeatureListener, Set<EStructuralFeature>> featureListeners;
-    private Table<Object, DataTypeListener, Set<EDataType>> dataTypeListeners;
-
-    private final Set<IEMFIndexingErrorListener> errorListeners;
     private final BaseIndexOptions baseIndexOptions;
 
     private EMFModelComprehension comprehension;
     
     private boolean loggedRegistrationMessage = false;
 
-    EMFBaseIndexMetaStore metaStore;
-    EMFBaseIndexInstanceStore instanceStore;
+    ISurrogateObjectService<Surrogate> surrogateObjectService;
+    EMFBaseIndexMetaStore<Surrogate> metaStore;
+    EMFBaseIndexSubscriptions<Surrogate> subscriptions;
+    EMFBaseIndexInstanceStore<Surrogate> instanceStore;
     EMFBaseIndexStatisticsStore statsStore;
 
     <T> Set<T> setMinus(Collection<? extends T> a, Collection<T> b) {
@@ -226,28 +208,25 @@ public class NavigationHelperImpl implements NavigationHelper {
         return comprehension;
     }
 
-    public NavigationHelperImpl(Notifier emfRoot, BaseIndexOptions options, Logger logger) throws ViatraBaseException {
+    public NavigationHelperImpl(Notifier emfRoot, BaseIndexOptions options, 
+            ISurrogateServiceFactory<Surrogate> surrogateServiceFactory, Logger logger) throws ViatraBaseException {
         this.baseIndexOptions = options.copy();
         this.logger = logger;
         assert (logger != null);
 
         this.comprehension = new EMFModelComprehension(baseIndexOptions);
         this.wildcardMode = baseIndexOptions.getWildcardLevel();
-        this.subscribedInstanceListeners = new HashMap<InstanceListener, Set<EClass>>();
-        this.subscribedFeatureListeners = new HashMap<FeatureListener, Set<EStructuralFeature>>();
-        this.subscribedDataTypeListeners = new HashMap<DataTypeListener, Set<EDataType>>();
-        this.lightweightObservers = new HashMap<LightweightEObjectObserver, Collection<EObject>>();
         this.observedFeatures = new HashMap<Object, IndexingLevel>();
         this.ignoreResolveNotificationFeatures = new HashSet<Object>();
         this.observedDataTypes = new HashMap<Object, IndexingLevel>();
 
-        metaStore = new EMFBaseIndexMetaStore(this);
-        instanceStore = new EMFBaseIndexInstanceStore(this, logger);
+        surrogateObjectService = surrogateServiceFactory.get();        
+        metaStore = new EMFBaseIndexMetaStore<Surrogate>(this);
+        subscriptions = new EMFBaseIndexSubscriptions<Surrogate>(metaStore, logger);
+        instanceStore = new EMFBaseIndexInstanceStore<Surrogate>(this, logger, surrogateObjectService);
         statsStore = new EMFBaseIndexStatisticsStore(this, logger);
 
         this.contentAdapter = new NavigationHelperContentAdapter(this);
-        this.baseIndexChangeListeners = new HashSet<EMFBaseIndexChangeListener>();
-        this.errorListeners = new LinkedHashSet<IEMFIndexingErrorListener>();
 
         this.notifier = emfRoot;
         this.modelRoots = new HashSet<Notifier>();
@@ -312,6 +291,9 @@ public class NavigationHelperImpl implements NavigationHelper {
         }
     }
 
+    public Map<Object, IndexingLevel> getObservedDataTypesInternal() {
+        return observedDataTypes;
+    }
     @Override
     public Set<Object> getDataTypeInstances(EDataType type) {
         Object typeKey = toKey(type);
@@ -334,12 +316,12 @@ public class NavigationHelperImpl implements NavigationHelper {
     public Set<Setting> findByAttributeValue(Object value_) {
         Object value = toCanonicalValueRepresentation(value_);
         Set<Setting> retSet = new HashSet<Setting>();
-        Map<Object, Collection<EObject>> valMap = instanceStore.getValueToFeatureToHolderMap().row(value);
+        Map<Object, Collection<Surrogate>> valMap = instanceStore.getValueToFeatureToHolderMap().row(value);
 
-        for (Entry<Object, Collection<EObject>> entry : valMap.entrySet()) {
-            final Collection<EObject> holders = entry.getValue();
+        for (Entry<Object, Collection<Surrogate>> entry : valMap.entrySet()) {
+            final Collection<Surrogate> holders = entry.getValue();
             EStructuralFeature feature = metaStore.getKnownFeatureForKey(entry.getKey());
-            for (EObject holder : EMFBaseIndexInstanceStore.holderCollectionToUniqueSet(holders)) {
+            for (EObject holder : instanceStore.holderCollectionToUniqueSet(holders)) {
                 retSet.add(new NavigationHelperSetting(feature, holder, value));
             }
         }
@@ -351,13 +333,13 @@ public class NavigationHelperImpl implements NavigationHelper {
     public Set<Setting> findByAttributeValue(Object value_, Collection<EAttribute> attributes) {
         Object value = toCanonicalValueRepresentation(value_);
         Set<Setting> retSet = new HashSet<Setting>();
-        Map<Object, Collection<EObject>> valMap = instanceStore.getValueToFeatureToHolderMap().row(value);
+        Map<Object, Collection<Surrogate>> valMap = instanceStore.getValueToFeatureToHolderMap().row(value);
 
         for (EAttribute attr : attributes) {
             Object feature = toKey(attr);
-            final Collection<EObject> holders = valMap.get(feature);
+            final Collection<Surrogate> holders = valMap.get(feature);
             if (holders != null) {
-                for (EObject holder : EMFBaseIndexInstanceStore.holderCollectionToUniqueSet(holders)) {
+                for (EObject holder : instanceStore.holderCollectionToUniqueSet(holders)) {
                     retSet.add(new NavigationHelperSetting(attr, holder, value));
                 }
             }
@@ -369,23 +351,36 @@ public class NavigationHelperImpl implements NavigationHelper {
     @Override
     public Set<EObject> findByAttributeValue(Object value_, EAttribute attribute) {
         Object value = toCanonicalValueRepresentation(value_);
-        Map<Object, Collection<EObject>> valMap = instanceStore.getValueToFeatureToHolderMap().row(value);
+        Map<Object, Collection<Surrogate>> valMap = instanceStore.getValueToFeatureToHolderMap().row(value);
         Object feature = toKey(attribute);
-        final Collection<EObject> holders = valMap.get(feature);
+        final Collection<Surrogate> holders = valMap.get(feature);
         if (holders == null) {
             return Collections.emptySet();
         } else {
-            return Collections.unmodifiableSet(EMFBaseIndexInstanceStore.holderCollectionToUniqueSet(holders));
+            return Collections.unmodifiableSet(instanceStore.holderCollectionToUniqueSet(holders));
         }
     }
 
     @Override
     public void processAllFeatureInstances(EStructuralFeature feature, IEStructuralFeatureProcessor processor) {
-        final Map<Object, Collection<EObject>> instanceMap = instanceStore.getValueToFeatureToHolderMap()
+        boolean ref = feature instanceof EReference;
+        final Map<Object, Collection<Surrogate>> instanceMap = instanceStore.getValueToFeatureToHolderMap()
                 .column(toKey(feature));
-        for (Entry<Object, Collection<EObject>> entry : instanceMap.entrySet()) {
-            final Collection<EObject> holders = entry.getValue();
-            for (EObject src : EMFBaseIndexInstanceStore.holderCollectionToUniqueSet(holders)) {
+        for (Entry<Object, Collection<Surrogate>> entry : instanceMap.entrySet()) {
+            Object featureValueInternal = entry.getKey();
+            Object featureValue = ref ? surrogateObjectService.fromExistingSurrogate((Surrogate) featureValueInternal) : featureValueInternal;
+            final Collection<Surrogate> holders = entry.getValue();
+            for (EObject src : instanceStore.holderCollectionToUniqueSet(holders)) {
+                processor.process(feature, src, featureValue);
+            }
+        }
+    }
+    public void processAllFeatureInstancesWithSurrogates(EStructuralFeature feature, IEStructuralFeatureSurrogateProcessor<Surrogate> processor) {
+        final Map<Object, Collection<Surrogate>> instanceMap = instanceStore.getValueToFeatureToHolderMap()
+                .column(toKey(feature));
+        for (Entry<Object, Collection<Surrogate>> entry : instanceMap.entrySet()) {
+            final Collection<Surrogate> holders = entry.getValue();
+            for (Surrogate src : instanceStore.holderCollectionToUniqueSurrogateSet(holders)) {
                 processor.process(feature, src, entry.getKey());
             }
         }
@@ -408,6 +403,24 @@ public class NavigationHelperImpl implements NavigationHelper {
         }
         processDirectInstancesInternal(type, processor, typeKey);
     }
+    
+    @Override
+    public void processDirectSurrogateInstances(EClass type, IEClassSurrogateProcessor<Surrogate> processor) {
+        Object typeKey = toKey(type);
+        processDirectSurrogateInstancesInternal(type, processor, typeKey);
+    }
+
+    @Override
+    public void processAllSurrogateInstances(EClass type, IEClassSurrogateProcessor<Surrogate> processor) {
+        Object typeKey = toKey(type);
+        Set<Object> subTypes = metaStore.getSubTypeMap().get(typeKey);
+        if (subTypes != null) {
+            for (Object subTypeKey : subTypes) {
+                processDirectSurrogateInstancesInternal(type, processor, subTypeKey);
+            }
+        }
+        processDirectSurrogateInstancesInternal(type, processor, typeKey);
+    }
 
     @Override
     public void processDataTypeInstances(EDataType type, IEDataTypeProcessor processor) {
@@ -429,15 +442,27 @@ public class NavigationHelperImpl implements NavigationHelper {
             }
         }
     }
+    private void processDirectSurrogateInstancesInternal(
+            EClass type, 
+            IEClassSurrogateProcessor<Surrogate> processor, 
+            Object typeKey) 
+    {
+        final Set<Surrogate> instances = instanceStore.getSurrogateInstanceSet(typeKey);
+        if (instances != null) {
+            for (Surrogate eObject : instances) {
+                processor.process(type, eObject);
+            }
+        }
+    }
 
     @Override
-    public Set<Setting> getInverseReferences(EObject target) {
+    public Set<Setting> getInverseReferences(EObject target) {// TODO surrogate
         Set<Setting> retSet = new HashSet<Setting>();
-        Map<Object, Collection<EObject>> valMap = instanceStore.getValueToFeatureToHolderMap().row(target);
+        Map<Object, Collection<Surrogate>> valMap = instanceStore.getValueToFeatureToHolderMap().row(target);
 
-        for (Entry<Object, Collection<EObject>> entry : valMap.entrySet()) {
-            final Collection<EObject> holders = entry.getValue();
-            for (EObject source : EMFBaseIndexInstanceStore.holderCollectionToUniqueSet(holders)) {
+        for (Entry<Object, Collection<Surrogate>> entry : valMap.entrySet()) {
+            final Collection<Surrogate> holders = entry.getValue();
+            for (EObject source : instanceStore.holderCollectionToUniqueSet(holders)) {
                 EStructuralFeature feature = metaStore.getKnownFeatureForKey(entry.getKey());
                 retSet.add(new NavigationHelperSetting(feature, source, target));
             }
@@ -447,15 +472,15 @@ public class NavigationHelperImpl implements NavigationHelper {
     }
 
     @Override
-    public Set<Setting> getInverseReferences(EObject target, Collection<EReference> references) {
+    public Set<Setting> getInverseReferences(EObject target, Collection<EReference> references) {// TODO surrogate
         Set<Setting> retSet = new HashSet<Setting>();
-        Map<Object, Collection<EObject>> valMap = instanceStore.getValueToFeatureToHolderMap().row(target);
+        Map<Object, Collection<Surrogate>> valMap = instanceStore.getValueToFeatureToHolderMap().row(target);
 
         for (EReference ref : references) {
             Object feature = toKey(ref);
-            final Collection<EObject> holders = valMap.get(feature);
+            final Collection<Surrogate> holders = valMap.get(feature);
             if (holders != null) {
-                for (EObject source : EMFBaseIndexInstanceStore.holderCollectionToUniqueSet(holders)) {
+                for (EObject source : instanceStore.holderCollectionToUniqueSet(holders)) {
                     retSet.add(new NavigationHelperSetting(ref, source, target));
                 }
             }
@@ -465,14 +490,14 @@ public class NavigationHelperImpl implements NavigationHelper {
     }
 
     @Override
-    public Set<EObject> getInverseReferences(EObject target, EReference reference) {
+    public Set<EObject> getInverseReferences(EObject target, EReference reference) { // TODO surrogate
         Object feature = toKey(reference);
-        Map<Object, Collection<EObject>> valMap = instanceStore.getValueToFeatureToHolderMap().row(target);
-        final Collection<EObject> holders = valMap.get(feature);
+        Map<Object, Collection<Surrogate>> valMap = instanceStore.getValueToFeatureToHolderMap().row(target);
+        final Collection<Surrogate> holders = valMap.get(feature);
         if (holders == null) {
             return Collections.emptySet();
         } else {
-            return Collections.unmodifiableSet(EMFBaseIndexInstanceStore.holderCollectionToUniqueSet(holders));
+            return Collections.unmodifiableSet(instanceStore.holderCollectionToUniqueSet(holders));
         }
     }
 
@@ -484,7 +509,17 @@ public class NavigationHelperImpl implements NavigationHelper {
     }
 
     @Override
-    public Set<Object> getFeatureTargets(EObject source, EStructuralFeature _feature) {
+    public Set<Object> getFeatureTargets(EObject source, EStructuralFeature _feature) { // TODO surrogate
+        Object feature = toKey(_feature);
+        final Set<Object> valSet = instanceStore.getHolderToFeatureToValueMap().get(source, feature);
+        if (valSet == null) {
+            return Collections.emptySet();
+        } else {
+            return Collections.unmodifiableSet(valSet);
+        }
+    }
+    @Override
+    public Set<Object> getFeatureSurrogateTargets(Surrogate source, EStructuralFeature _feature) {
         Object feature = toKey(_feature);
         final Set<Object> valSet = instanceStore.getHolderToFeatureToValueMap().get(source, feature);
         if (valSet == null) {
@@ -495,23 +530,29 @@ public class NavigationHelperImpl implements NavigationHelper {
     }
 
     @Override
-    public Map<EObject, Set<Object>> getFeatureInstances(EStructuralFeature _feature) {
+    public Map<EObject, Set<Object>> getFeatureInstances(EStructuralFeature _feature) { // TODO surrogate
         Object feature = toKey(_feature);
-        final Map<EObject, Set<Object>> valMap = instanceStore.getHolderToFeatureToValueMap().column(feature);
+        final Map<Surrogate, Set<Object>> valMap = instanceStore.getHolderToFeatureToValueMap().column(feature);
         if (valMap == null) {
             return Collections.emptyMap();
         } else {
-            return Collections.unmodifiableMap(valMap);
+            return Collections.unmodifiableMap(surrogateObjectService.fromExistingSurrogateKeyedMap(valMap));
         }
     }
-
+    
     @Override
-    public boolean isFeatureInstance(EObject source, Object target, EStructuralFeature _feature) {
+    public boolean isFeatureInstance(EObject _source, Object target, EStructuralFeature _feature) {
+        Surrogate source = surrogateObjectService.getExistingSurrogate(_source);
+        return isSurrogateFeatureInstance(source, target, _feature);
+    }
+    
+    @Override
+    public boolean isSurrogateFeatureInstance(Surrogate source, Object target, EStructuralFeature _feature) {
         Object feature = toKey(_feature);
-        final Map<Object, Collection<EObject>> valMap = instanceStore.getValueToFeatureToHolderMap().column(feature);
+        final Map<Object, Collection<Surrogate>> valMap = instanceStore.getValueToFeatureToHolderMap().column(feature);
         return valMap != null && valMap.containsKey(target) && valMap.get(target).contains(source);
     }
-
+    
     @Override
     public Set<EObject> getDirectInstances(EClass type) {
         Object typeKey = toKey(type);
@@ -557,6 +598,28 @@ public class NavigationHelperImpl implements NavigationHelper {
 
         return retSet;
     }
+    @Override
+    public Set<Surrogate> getAllSurrogateInstances(EClass type) {
+        Set<Surrogate> retSet = new HashSet<Surrogate>();
+
+        Object typeKey = toKey(type);
+        Set<Object> subTypes = metaStore.getSubTypeMap().get(typeKey);
+        if (subTypes != null) {
+            for (Object subTypeKey : subTypes) {
+                final Set<Surrogate> instances = instanceStore.getSurrogateInstanceSet(subTypeKey);
+                if (instances != null) {
+                    retSet.addAll(instances);
+                }
+            }
+        }
+        final Set<Surrogate> instances = instanceStore.getSurrogateInstanceSet(typeKey);
+        if (instances != null) {
+            retSet.addAll(instances);
+        }
+
+        return retSet;
+    }
+
     
     @Override
     public boolean isInstanceOfUnscoped(EObject object, EClass clazz) {
@@ -585,292 +648,82 @@ public class NavigationHelperImpl implements NavigationHelper {
         final Set<EObject> instances = instanceStore.getInstanceSet(typeKey);
         return instances != null && instances.contains(object);
     }
-
+    
+    @Override
+    public boolean isSurrogateInstanceOfUnscoped(Surrogate surrogate, EClass clazz) {
+        Object candidateTypeKey = toKey(clazz);
+        Object typeKey = toKey(surrogateObjectService.eClassOfExistingSurrogate(surrogate)); 
+        
+        if (candidateTypeKey.equals(typeKey)) return true;
+        if (metaStore.getEObjectClassKey().equals(candidateTypeKey)) return true;
+                    
+        Set<Object> superTypes = metaStore.getSuperTypeMap().get(typeKey);
+        return superTypes.contains(candidateTypeKey);            
+    }
+    
+    @Override
+    public boolean isSurrogateInstanceOfScoped(Surrogate object, EClass clazz) {
+        Object typeKey = toKey(clazz);
+        Set<Object> subTypes = metaStore.getSubTypeMap().get(typeKey);
+        if (subTypes != null) {
+            for (Object subTypeKey : subTypes) {
+                final Set<Surrogate> instances = instanceStore.getSurrogateInstanceSet(subTypeKey);
+                if(instances != null && instances.contains(object))
+                    return true;
+            }
+        }
+        final Set<Surrogate> instances = instanceStore.getSurrogateInstanceSet(typeKey);
+        return instances != null && instances.contains(object);
+    }
+    
     @Override
     public Set<EObject> findByFeatureValue(Object value_, EStructuralFeature _feature) {
         Object value = toCanonicalValueRepresentation(value_);
         Object feature = toKey(_feature);
         Set<EObject> retSet = new HashSet<EObject>();
-        Map<Object, Collection<EObject>> valMap = instanceStore.getValueToFeatureToHolderMap().row(value);
-        final Collection<EObject> holders = valMap.get(feature);
+        Map<Object, Collection<Surrogate>> valMap = instanceStore.getValueToFeatureToHolderMap().row(value);
+        final Collection<Surrogate> holders = valMap.get(feature);
         if (holders != null) {
-            retSet.addAll(EMFBaseIndexInstanceStore.holderCollectionToUniqueSet(holders));
+            retSet.addAll(instanceStore.holderCollectionToUniqueSet(holders));
         }
         return retSet;
+    }
+    
+    @Override
+    public Set<Surrogate> findSurrogateByFeatureValue(Object value_, EStructuralFeature _feature) {
+        Object value = toCanonicalValueRepresentation(value_);
+        Object feature = toKey(_feature);
+        Map<Object, Collection<Surrogate>> valMap = instanceStore.getValueToFeatureToHolderMap().row(value);
+        final Collection<Surrogate> holders = valMap.get(feature);
+        if (holders == null) {
+            return Collections.emptySet();
+        } else {
+            return instanceStore.holderCollectionToUniqueSurrogateSet(holders);
+        }
     }
 
     @Override
     public Set<EObject> getHoldersOfFeature(EStructuralFeature _feature) {
         Object feature = toKey(_feature);
-        Multiset<EObject> holders = instanceStore.getFeatureToHolderMap().get(feature);
+        Multiset<Surrogate> holders = instanceStore.getFeatureToHolderMap().get(feature);
         if (holders == null) {
             return Collections.emptySet();
         } else {
-            return Collections.unmodifiableSet(holders.elementSet());
-        }
-    }
-
-    @Override
-    public void addInstanceListener(Collection<EClass> classes, InstanceListener listener) {
-        Set<EClass> registered = this.subscribedInstanceListeners.get(listener);
-        if (registered == null) {
-            registered = new HashSet<EClass>();
-            this.subscribedInstanceListeners.put(listener, registered);
-        }
-        Set<EClass> delta = setMinus(classes, registered);
-        if (!delta.isEmpty()) {
-            registered.addAll(delta);
-            if (instanceListeners != null) { // if already computed
-                for (EClass subscriptionType : delta) {
-                    final Object superElementTypeKey = toKey(subscriptionType);
-                    addInstanceListenerInternal(listener, subscriptionType, superElementTypeKey);
-                    final Set<Object> subTypeKeys = metaStore.getSubTypeMap().get(superElementTypeKey);
-                    if (subTypeKeys != null)
-                        for (Object subTypeKey : subTypeKeys) {
-                            addInstanceListenerInternal(listener, subscriptionType, subTypeKey);
-                        }
-                }
-            }
-        }
-    }
-
-    @Override
-    public void removeInstanceListener(Collection<EClass> classes, InstanceListener listener) {
-        Set<EClass> restriction = this.subscribedInstanceListeners.get(listener);
-        if (restriction != null) {
-            boolean changed = restriction.removeAll(classes);
-            if (restriction.size() == 0) {
-                this.subscribedInstanceListeners.remove(listener);
-            }
-            if (changed)
-                instanceListeners = null; // recompute later on demand
-        }
-    }
-
-    @Override
-    public void addFeatureListener(Collection<? extends EStructuralFeature> features, FeatureListener listener) {
-        Set<EStructuralFeature> registered = this.subscribedFeatureListeners.get(listener);
-        if (registered == null) {
-            registered = new HashSet<EStructuralFeature>();
-            this.subscribedFeatureListeners.put(listener, registered);
-        }
-        Set<EStructuralFeature> delta = setMinus(features, registered);
-        if (!delta.isEmpty()) {
-            registered.addAll(delta);
-            if (featureListeners != null) { // if already computed
-                for (EStructuralFeature subscriptionType : delta) {
-                    addFeatureListenerInternal(listener, subscriptionType, toKey(subscriptionType));
-                }
-            }
-        }
-    }
-
-    @Override
-    public void removeFeatureListener(Collection<? extends EStructuralFeature> features, FeatureListener listener) {
-        Collection<EStructuralFeature> restriction = this.subscribedFeatureListeners.get(listener);
-        if (restriction != null) {
-            boolean changed = restriction.removeAll(features);
-            if (restriction.size() == 0) {
-                this.subscribedFeatureListeners.remove(listener);
-            }
-            if (changed)
-                featureListeners = null; // recompute later on demand
-        }
-    }
-
-    @Override
-    public void addDataTypeListener(Collection<EDataType> types, DataTypeListener listener) {
-        Set<EDataType> registered = this.subscribedDataTypeListeners.get(listener);
-        if (registered == null) {
-            registered = new HashSet<EDataType>();
-            this.subscribedDataTypeListeners.put(listener, registered);
-        }
-        Set<EDataType> delta = setMinus(types, registered);
-        if (!delta.isEmpty()) {
-            registered.addAll(delta);
-            if (dataTypeListeners != null) { // if already computed
-                for (EDataType subscriptionType : delta) {
-                    addDatatypeListenerInternal(listener, subscriptionType, toKey(subscriptionType));
-                }
-            }
-        }
-    }
-
-    @Override
-    public void removeDataTypeListener(Collection<EDataType> types, DataTypeListener listener) {
-        Collection<EDataType> restriction = this.subscribedDataTypeListeners.get(listener);
-        if (restriction != null) {
-            boolean changed = restriction.removeAll(types);
-            if (restriction.size() == 0) {
-                this.subscribedDataTypeListeners.remove(listener);
-            }
-            if (changed)
-                dataTypeListeners = null; // recompute later on demand
-        }
-    }
-
-    /**
-     * @return the observedDataTypes
-     */
-    public Map<Object, IndexingLevel> getObservedDataTypesInternal() {
-        return observedDataTypes;
-    }
-
-    @Override
-    public boolean addLightweightEObjectObserver(LightweightEObjectObserver observer, EObject observedObject) {
-        Collection<EObject> observedObjects = lightweightObservers.get(observer);
-        if (observedObjects == null) {
-            observedObjects = new HashSet<EObject>();
-            lightweightObservers.put(observer, observedObjects);
-        }
-        return observedObjects.add(observedObject);
-    }
-
-    @Override
-    public boolean removeLightweightEObjectObserver(LightweightEObjectObserver observer, EObject observedObject) {
-        boolean result = false;
-        Collection<EObject> observedObjects = lightweightObservers.get(observer);
-        if (observedObjects != null) {
-            result = observedObjects.remove(observedObject);
-            if (observedObjects.isEmpty()) {
-                lightweightObservers.remove(observer);
-            }
-        }
-        return result;
-    }
-
-    /**
-     * @return the lightweightObservers
-     */
-    public Map<LightweightEObjectObserver, Collection<EObject>> getLightweightObservers() {
-        return lightweightObservers;
-    }
-
-    public void notifyBaseIndexChangeListeners() {
-        notifyBaseIndexChangeListeners(instanceStore.isDirty);
-        if (instanceStore.isDirty) {
-            instanceStore.isDirty = false;
-        }
-    }
-
-    /**
-     * This will run after updates.
-     */
-    protected void notifyBaseIndexChangeListeners(boolean baseIndexChanged) {
-        if (!baseIndexChangeListeners.isEmpty()) {
-            for (EMFBaseIndexChangeListener listener : new ArrayList<EMFBaseIndexChangeListener>(
-                    baseIndexChangeListeners)) {
-                try {
-                    if (!listener.onlyOnIndexChange() || baseIndexChanged) {
-                        listener.notifyChanged(baseIndexChanged);
-                    }
-                } catch (Exception ex) {
-                    notifyFatalListener("VIATRA Base encountered an error in delivering notifications about changes. ",
-                            ex);
-                }
-            }
-        }
-    }
-
-    void notifyDataTypeListeners(final Object typeKey, final Object value, final boolean isInsertion,
-            final boolean firstOrLastOccurrence) {
-        for (final Entry<DataTypeListener, Set<EDataType>> entry : getDataTypeListeners().row(typeKey).entrySet()) {
-            final DataTypeListener listener = entry.getKey();
-            for (final EDataType subscriptionType : entry.getValue()) {
-                if (isInsertion) {
-                    listener.dataTypeInstanceInserted(subscriptionType, value, firstOrLastOccurrence);
-                } else {
-                    listener.dataTypeInstanceDeleted(subscriptionType, value, firstOrLastOccurrence);
-                }
-            }
-        }
-    }
-
-    void notifyFeatureListeners(final EObject host, final Object featureKey, final Object value,
-            final boolean isInsertion) {
-        for (final Entry<FeatureListener, Set<EStructuralFeature>> entry : getFeatureListeners().row(featureKey)
-                .entrySet()) {
-            final FeatureListener listener = entry.getKey();
-            for (final EStructuralFeature subscriptionType : entry.getValue()) {
-                if (isInsertion) {
-                    listener.featureInserted(host, subscriptionType, value);
-                } else {
-                    listener.featureDeleted(host, subscriptionType, value);
-                }
-            }
-        }
-    }
-
-    void notifyInstanceListeners(final Object clazzKey, final EObject instance, final boolean isInsertion) {
-        for (final Entry<InstanceListener, Set<EClass>> entry : getInstanceListeners().row(clazzKey).entrySet()) {
-            final InstanceListener listener = entry.getKey();
-            for (final EClass subscriptionType : entry.getValue()) {
-                if (isInsertion) {
-                    listener.instanceInserted(subscriptionType, instance);
-                } else {
-                    listener.instanceDeleted(subscriptionType, instance);
-                }
-            }
-        }
-    }
-
-    void notifyLightweightObservers(final EObject host, final EStructuralFeature feature,
-            final Notification notification) {
-        for (final Entry<LightweightEObjectObserver, Collection<EObject>> entry : getLightweightObservers()
-                .entrySet()) {
-            if (entry.getValue().contains(host)) {
-                entry.getKey().notifyFeatureChanged(host, feature, notification);
-            }
-        }
-    }
-
-    @Override
-    public void addBaseIndexChangeListener(EMFBaseIndexChangeListener listener) {
-        checkArgument(listener != null, "Cannot add null listener!");
-        baseIndexChangeListeners.add(listener);
-    }
-
-    @Override
-    public void removeBaseIndexChangeListener(EMFBaseIndexChangeListener listener) {
-        checkArgument(listener != null, "Cannot remove null listener!");
-        baseIndexChangeListeners.remove(listener);
-    }
-
-    @Override
-    public boolean addIndexingErrorListener(IEMFIndexingErrorListener listener) {
-        return errorListeners.add(listener);
-    }
-
-    @Override
-    public boolean removeIndexingErrorListener(IEMFIndexingErrorListener listener) {
-        return errorListeners.remove(listener);
-    }
-
-    protected void processingFatal(final Throwable ex, final String task) {
-        notifyFatalListener(logTaskFormat(task), ex);
-    }
-
-    protected void processingError(final Throwable ex, final String task) {
-        notifyErrorListener(logTaskFormat(task), ex);
-    }
-    
-    public void notifyErrorListener(String message, Throwable t) {
-        logger.error(message, t);
-        for (IEMFIndexingErrorListener listener : errorListeners) {
-            listener.error(message, t);
-        }
-    }
-
-    public void notifyFatalListener(String message, Throwable t) {
-        logger.fatal(message, t);
-        for (IEMFIndexingErrorListener listener : errorListeners) {
-            listener.fatal(message, t);
+            return Collections.unmodifiableSet(surrogateObjectService.fromExistingSurrogateSet(holders.elementSet()));
         }
     }
 
     private String logTaskFormat(final String task) {
         return "VIATRA Query encountered an error in processing the EMF model. " + "This happened while trying to "
                 + task;
+    }
+    
+    protected void processingFatal(final Throwable ex, final String task) {
+        subscriptions.notifyFatalListener(logTaskFormat(task), ex);
+    }
+
+    protected void processingError(final Throwable ex, final String task) {
+        subscriptions.notifyErrorListener(logTaskFormat(task), ex);
     }
 
     protected void considerForExpansion(EObject obj) {
@@ -971,95 +824,6 @@ public class NavigationHelperImpl implements NavigationHelper {
         return allObservedClasses;
     }
 
-    /**
-     * @return the instanceListeners
-     */
-    Table<Object, InstanceListener, Set<EClass>> getInstanceListeners() {
-        if (instanceListeners == null) {
-            instanceListeners = HashBasedTable.create(100, 1);
-            for (Entry<InstanceListener, Set<EClass>> subscription : subscribedInstanceListeners.entrySet()) {
-                final InstanceListener listener = subscription.getKey();
-                for (EClass subscriptionType : subscription.getValue()) {
-                    final Object superElementTypeKey = toKey(subscriptionType);
-                    addInstanceListenerInternal(listener, subscriptionType, superElementTypeKey);
-                    final Set<Object> subTypeKeys = metaStore.getSubTypeMap().get(superElementTypeKey);
-                    if (subTypeKeys != null)
-                        for (Object subTypeKey : subTypeKeys) {
-                            addInstanceListenerInternal(listener, subscriptionType, subTypeKey);
-                        }
-                }
-            }
-        }
-        return instanceListeners;
-    }
-
-    Table<Object, InstanceListener, Set<EClass>> peekInstanceListeners() {
-        return instanceListeners;
-    }
-
-    void addInstanceListenerInternal(final InstanceListener listener, EClass subscriptionType,
-            final Object elementTypeKey) {
-        Set<EClass> subscriptionTypes = instanceListeners.get(elementTypeKey, listener);
-        if (subscriptionTypes == null) {
-            subscriptionTypes = new HashSet<EClass>();
-            instanceListeners.put(elementTypeKey, listener, subscriptionTypes);
-        }
-        subscriptionTypes.add(subscriptionType);
-    }
-
-    /**
-     * @return the featureListeners
-     */
-    Table<Object, FeatureListener, Set<EStructuralFeature>> getFeatureListeners() {
-        if (featureListeners == null) {
-            featureListeners = HashBasedTable.create(100, 1);
-            for (Entry<FeatureListener, Set<EStructuralFeature>> subscription : subscribedFeatureListeners.entrySet()) {
-                final FeatureListener listener = subscription.getKey();
-                for (EStructuralFeature subscriptionType : subscription.getValue()) {
-                    final Object elementTypeKey = toKey(subscriptionType);
-                    addFeatureListenerInternal(listener, subscriptionType, elementTypeKey);
-                }
-            }
-        }
-        return featureListeners;
-    }
-
-    void addFeatureListenerInternal(final FeatureListener listener, EStructuralFeature subscriptionType,
-            final Object elementTypeKey) {
-        Set<EStructuralFeature> subscriptionTypes = featureListeners.get(elementTypeKey, listener);
-        if (subscriptionTypes == null) {
-            subscriptionTypes = new HashSet<EStructuralFeature>();
-            featureListeners.put(elementTypeKey, listener, subscriptionTypes);
-        }
-        subscriptionTypes.add(subscriptionType);
-    }
-
-    /**
-     * @return the dataTypeListeners
-     */
-    Table<Object, DataTypeListener, Set<EDataType>> getDataTypeListeners() {
-        if (dataTypeListeners == null) {
-            dataTypeListeners = HashBasedTable.create(100, 1);
-            for (Entry<DataTypeListener, Set<EDataType>> subscription : subscribedDataTypeListeners.entrySet()) {
-                final DataTypeListener listener = subscription.getKey();
-                for (EDataType subscriptionType : subscription.getValue()) {
-                    final Object elementTypeKey = toKey(subscriptionType);
-                    addDatatypeListenerInternal(listener, subscriptionType, elementTypeKey);
-                }
-            }
-        }
-        return dataTypeListeners;
-    }
-
-    void addDatatypeListenerInternal(final DataTypeListener listener, EDataType subscriptionType,
-            final Object elementTypeKey) {
-        Set<EDataType> subscriptionTypes = dataTypeListeners.get(elementTypeKey, listener);
-        if (subscriptionTypes == null) {
-            subscriptionTypes = new HashSet<EDataType>();
-            dataTypeListeners.put(elementTypeKey, listener, subscriptionTypes);
-        }
-        subscriptionTypes.add(subscriptionType);
-    }
 
     public void registerObservedTypes(Set<EClass> classes, Set<EDataType> dataTypes,
             Set<? extends EStructuralFeature> features) {
@@ -1141,7 +905,7 @@ public class NavigationHelperImpl implements NavigationHelper {
     public void unregisterEStructuralFeatures(Set<? extends EStructuralFeature> features) {
         if (isRegistrationNecessary(IndexingLevel.FULL) && features != null) {
             final Set<Object> resolved = resolveFeaturesToKey(features);
-            ensureNoListeners(resolved, getFeatureListeners());
+            ensureNoListeners(resolved, subscriptions.getFeatureListeners());
             observedFeatures.keySet().removeAll(resolved);
             delayedFeatures.keySet().removeAll(resolved);
             for (Object f : resolved) {
@@ -1199,7 +963,7 @@ public class NavigationHelperImpl implements NavigationHelper {
     public void unregisterEClasses(Set<EClass> classes) {
         if (isRegistrationNecessary(IndexingLevel.FULL) && classes != null) {
             final Set<Object> resolved = resolveClassifiersToKey(classes);
-            ensureNoListeners(resolved, getInstanceListeners());
+            ensureNoListeners(resolved, subscriptions.getInstanceSurrogateListeners());
             directlyObservedClasses.keySet().removeAll(resolved);
             allObservedClasses = null;
             delayedClasses.keySet().removeAll(resolved);
@@ -1242,7 +1006,7 @@ public class NavigationHelperImpl implements NavigationHelper {
     public void unregisterEDataTypes(Set<EDataType> dataTypes) {
         if (isRegistrationNecessary(IndexingLevel.FULL) && dataTypes != null) {
             final Set<Object> resolved = resolveClassifiersToKey(dataTypes);
-            ensureNoListeners(resolved, getDataTypeListeners());
+            ensureNoListeners(resolved, subscriptions.getDataTypeListeners());
             observedDataTypes.keySet().removeAll(resolved);
             delayedDataTypes.keySet().removeAll(resolved);
             for (Object dataType : resolved) {
@@ -1395,7 +1159,7 @@ public class NavigationHelperImpl implements NavigationHelper {
                     }
                 }
             } catch (Exception e) {
-                notifyFatalListener(
+                subscriptions.notifyFatalListener(
                         "VIATRA Base encountered an error while traversing the EMF model to gather new information. ",
                         e);
                 throw new InvocationTargetException(e);
@@ -1506,9 +1270,7 @@ public class NavigationHelperImpl implements NavigationHelper {
     }
 
     private void ensureNoListenersForDispose() {
-        if (!(baseIndexChangeListeners.isEmpty() && subscribedFeatureListeners.isEmpty()
-                && subscribedDataTypeListeners.isEmpty() && subscribedInstanceListeners.isEmpty()))
-            throw new IllegalStateException("Cannot dispose while there are active listeners");
+        subscriptions.ensureNoListenersForDispose();
     }
 
     /**
@@ -1547,12 +1309,19 @@ public class NavigationHelperImpl implements NavigationHelper {
             notifyBaseIndexChangeListeners();
         }
     }
-
+    
+    public void notifyBaseIndexChangeListeners() {
+        subscriptions.notifyBaseIndexChangeListeners(instanceStore.isDirty);
+        if (instanceStore.isDirty) {
+            instanceStore.isDirty = false;
+        }
+    }
+    
     protected void resampleFeatureValueForHolder(EObject source, EStructuralFeature feature,
             EMFVisitor insertionVisitor, EMFVisitor removalVisitor) {
         // traverse features and update value
         Object newValue = source.eGet(feature);
-        Set<Object> oldValues = instanceStore.getOldValuesForHolderAndFeature(source, feature);
+        Set<Object> oldValues = instanceStore.getOldValuesForHolderAndFeature(surrogateObjectService.getExistingSurrogate(source), feature);
         if (feature.isMany()) {
             resampleManyFeatureValueForHolder(source, feature, newValue, oldValues, insertionVisitor, removalVisitor);
         } else {
@@ -1576,7 +1345,7 @@ public class NavigationHelperImpl implements NavigationHelper {
             }
             ENotificationImpl removeNotification = new ENotificationImpl(internalEObject, Notification.REMOVE_MANY,
                     feature, oldValues, null);
-            notifyLightweightObservers(source, feature, removeNotification);
+            subscriptions.notifyLightweightObservers(source, feature, removeNotification);
         }
         if (!newValueSet.isEmpty()) {
             for (Object nv : newValueSet) {
@@ -1584,7 +1353,7 @@ public class NavigationHelperImpl implements NavigationHelper {
             }
             ENotificationImpl addNotification = new ENotificationImpl(internalEObject, Notification.ADD_MANY, feature,
                     null, newValueSet);
-            notifyLightweightObservers(source, feature, addNotification);
+            subscriptions.notifyLightweightObservers(source, feature, addNotification);
         }
     }
 
@@ -1598,7 +1367,7 @@ public class NavigationHelperImpl implements NavigationHelper {
             comprehension.traverseFeature(insertionVisitor, source, feature, newValue, null);
             ENotificationImpl notification = new ENotificationImpl(internalEObject, Notification.SET, feature, oldValue,
                     newValue);
-            notifyLightweightObservers(source, feature, notification);
+            subscriptions.notifyLightweightObservers(source, feature, notification);
         }
     }
 
@@ -1630,6 +1399,10 @@ public class NavigationHelperImpl implements NavigationHelper {
 
     @Override
     public int countFeatureTargets(EObject seedSource, EStructuralFeature feature) {
+        return instanceStore.getHolderToFeatureToValueMap().get(surrogateObjectService.getExistingSurrogate(seedSource), toKey(feature)).size();
+    }
+    @Override
+    public int countFeatureTargetsFromSurrogate(Surrogate seedSource, EStructuralFeature feature) {
         return instanceStore.getHolderToFeatureToValueMap().get(seedSource, toKey(feature)).size();
     }
 
@@ -1681,6 +1454,140 @@ public class NavigationHelperImpl implements NavigationHelper {
                 return null;
             }
         });
+    }
+
+    @Override
+    public void addInstanceListener(Collection<EClass> classes, InstanceListener listener) {
+        subscriptions.addInstanceSurrogateListener(classes, new InstanceListenerWrapper(listener));
+    }
+
+    @Override
+    public void removeInstanceListener(Collection<EClass> classes, InstanceListener listener) {
+        subscriptions.removeInstanceSurrogateListener(classes, new InstanceListenerWrapper(listener));
+    }
+    
+    @Override
+    public void addInstanceSurrogateListener(Collection<EClass> classes, InstanceSurrogateListener<Surrogate> listener) {
+        subscriptions.addInstanceSurrogateListener(classes, listener);
+    }
+
+    @Override
+    public void removeInstanceSurrogateListener(Collection<EClass> classes, InstanceSurrogateListener<Surrogate> listener) {
+        subscriptions.removeInstanceSurrogateListener(classes, listener);
+    }
+    
+    class InstanceListenerWrapper implements InstanceSurrogateListener<Surrogate> {
+
+        InstanceListener wrapped;
+        
+        public InstanceListenerWrapper(InstanceListener wrapped) {
+            this.wrapped = wrapped;
+        }
+
+        @Override
+        public void instanceInserted(EClass clazz, Surrogate instance) {
+            wrapped.instanceInserted(clazz, 
+                    surrogateObjectService.fromExistingSurrogate(instance));
+        }
+
+        @Override
+        public void instanceDeleted(EClass clazz, Surrogate instance) {
+            wrapped.instanceDeleted(clazz, 
+                    surrogateObjectService.fromExistingSurrogate(instance));
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hashCode(outer(), wrapped);
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj)
+                return true;
+            if (obj == null)
+                return false;
+            if (getClass() != obj.getClass())
+                return false;
+            InstanceListenerWrapper other = (InstanceListenerWrapper) obj;
+            return 
+                    Objects.equal(wrapped, other.wrapped) &&
+                    Objects.equal(outer(), other.outer());
+        }
+
+        private NavigationHelperImpl<Surrogate> outer() {
+            return NavigationHelperImpl.this;
+        }
+        
+    }
+    
+
+    @Override
+    public void addDataTypeListener(Collection<EDataType> types, DataTypeListener listener) {
+        subscriptions.addDataTypeListener(types, listener);
+    }
+
+    @Override
+    public void removeDataTypeListener(Collection<EDataType> types, DataTypeListener listener) {
+        subscriptions.removeDataTypeListener(types, listener);
+    }
+
+    @Override
+    public void addFeatureListener(Collection<? extends EStructuralFeature> features, FeatureListener listener) {
+        subscriptions.addFeatureListener(features, listener);
+    }
+
+    @Override
+    public void removeFeatureListener(Collection<? extends EStructuralFeature> features, FeatureListener listener) {
+        subscriptions.removeFeatureListener(features, listener);
+    }
+    
+    @Override
+    public void addFeatureSurrogateListener(Collection<? extends EStructuralFeature> features,
+            FeatureSurrogateListener<Surrogate> listener) {
+        subscriptions.addFeatureSurrogateListener(features, listener);
+    }
+    
+    @Override
+    public void removeFeatureSurrogateListener(Collection<? extends EStructuralFeature> features,
+            FeatureSurrogateListener<Surrogate> listener) {
+        subscriptions.removeFeatureSurrogateListener(features, listener);
+    }
+    
+
+    @Override
+    public boolean addLightweightEObjectObserver(LightweightEObjectObserver observer, EObject observedObject) {
+        return subscriptions.addLightweightEObjectObserver(observer, observedObject);
+    }
+
+    @Override
+    public boolean removeLightweightEObjectObserver(LightweightEObjectObserver observer, EObject observedObject) {
+        return subscriptions.removeLightweightEObjectObserver(observer, observedObject);
+    }
+
+    @Override
+    public void addBaseIndexChangeListener(EMFBaseIndexChangeListener listener) {
+        subscriptions.addBaseIndexChangeListener(listener);
+    }
+
+    @Override
+    public void removeBaseIndexChangeListener(EMFBaseIndexChangeListener listener) {
+        subscriptions.removeBaseIndexChangeListener(listener);
+    }
+
+    @Override
+    public boolean addIndexingErrorListener(IEMFIndexingErrorListener listener) {
+        return subscriptions.addIndexingErrorListener(listener);
+    }
+
+    @Override
+    public boolean removeIndexingErrorListener(IEMFIndexingErrorListener listener) {
+        return subscriptions.removeIndexingErrorListener(listener);
+    }
+
+    @Override
+    public NavigationHelper getNavigationHelper() {
+        return this;
     }
 
 }

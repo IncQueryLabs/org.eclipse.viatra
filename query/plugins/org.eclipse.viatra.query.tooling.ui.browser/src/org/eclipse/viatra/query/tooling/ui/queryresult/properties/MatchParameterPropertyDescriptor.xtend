@@ -143,9 +143,9 @@ class MatchParameterPropertyDescriptor implements IPropertyDescriptor {
     protected def getChoiceOfValues(EClass eClass) {
         val choiceOfValues = newArrayList()
         val emfBaseIndex = matcher.matcher.engine.baseIndex as EMFBaseIndexWrapper
-        val navigationHelper = emfBaseIndex.navigationHelper
-        if(navigationHelper.isInWildcardMode || navigationHelper.getIndexingLevel(eClass) == IndexingLevel.FULL) {
-            val allInstances = navigationHelper.getAllInstances(eClass)
+        val baseIndex = emfBaseIndex.wrapped
+        if(baseIndex.isInWildcardMode(IndexingLevel.FULL) || baseIndex.getIndexingLevel(eClass) == IndexingLevel.FULL) {
+            val allInstances = baseIndex.getAllSurrogateInstances(eClass)
             choiceOfValues += allInstances
         } else {
             choiceOfValues += matcher.matcher.getAllValues(parameter.name)
@@ -156,9 +156,9 @@ class MatchParameterPropertyDescriptor implements IPropertyDescriptor {
     protected def getChoiceOfValues(EDataType eDataType) {
         val choiceOfValues = newArrayList()
         val emfBaseIndex = matcher.matcher.engine.baseIndex as EMFBaseIndexWrapper
-        val navigationHelper = emfBaseIndex.navigationHelper
-        if(navigationHelper.isInWildcardMode || navigationHelper.getIndexingLevel(eDataType) == IndexingLevel.FULL) {
-            val allInstances = navigationHelper.getDataTypeInstances(eDataType)
+        val baseIndex = emfBaseIndex.wrapped
+        if(baseIndex.isInWildcardMode(IndexingLevel.FULL) || baseIndex.getIndexingLevel(eDataType) == IndexingLevel.FULL) {
+            val allInstances = baseIndex.getDataTypeInstances(eDataType)
             choiceOfValues += allInstances
         } else {
             choiceOfValues += matcher.matcher.getAllValues(parameter.name)

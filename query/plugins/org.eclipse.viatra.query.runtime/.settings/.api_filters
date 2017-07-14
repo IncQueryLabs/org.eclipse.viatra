@@ -16,6 +16,20 @@
             </message_arguments>
         </filter>
     </resource>
+    <resource path="src/org/eclipse/viatra/query/runtime/emf/EMFBaseIndexWrapper.java" type="org.eclipse.viatra.query.runtime.emf.EMFBaseIndexWrapper">
+        <filter id="338722907">
+            <message_arguments>
+                <message_argument value="org.eclipse.viatra.query.runtime.emf.EMFBaseIndexWrapper"/>
+                <message_argument value="EMFBaseIndexWrapper(NavigationHelper)"/>
+            </message_arguments>
+        </filter>
+        <filter id="338792546">
+            <message_arguments>
+                <message_argument value="org.eclipse.viatra.query.runtime.emf.EMFBaseIndexWrapper"/>
+                <message_argument value="getNavigationHelper()"/>
+            </message_arguments>
+        </filter>
+    </resource>
     <resource path="src/org/eclipse/viatra/query/runtime/internal/apiimpl/ViatraQueryEngineImpl.java" type="org.eclipse.viatra.query.runtime.internal.apiimpl.ViatraQueryEngineImpl">
         <filter id="572522506">
             <message_arguments>

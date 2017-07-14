@@ -59,6 +59,7 @@ public class NavigationHelperContentAdapter extends AdapterImpl {
     // Set<EObject> ignoreRootDeletion = new HashSet<EObject>();
 
     private final EMFModelComprehension comprehension;
+    private EMFBaseIndexSubscriptions subscriptions;
 
     private IBaseIndexObjectFilter objectFilterConfiguration;
     private IBaseIndexResourceFilter resourceFilterConfiguration;
@@ -68,12 +69,16 @@ public class NavigationHelperContentAdapter extends AdapterImpl {
     private EMFVisitor removalVisitor;
     private EMFVisitor insertionVisitor;
 
+
+
+
     public NavigationHelperContentAdapter(final NavigationHelperImpl navigationHelper) {
         this.navigationHelper = navigationHelper;
         final BaseIndexOptions options = this.navigationHelper.getBaseIndexOptions();
         objectFilterConfiguration = options.getObjectFilterConfiguration();
         resourceFilterConfiguration = options.getResourceFilterConfiguration();
         this.comprehension = navigationHelper.getComprehension();
+        subscriptions = navigationHelper.subscriptions;
         
         removalVisitor = new NavigationHelperVisitor.ChangeVisitor(navigationHelper, false);
         insertionVisitor = new NavigationHelperVisitor.ChangeVisitor(navigationHelper, true);
@@ -99,7 +104,7 @@ public class NavigationHelperContentAdapter extends AdapterImpl {
                         final boolean notifyLightweightObservers = handleNotification(notification, notifier, feature);
 
                         if (notifyLightweightObservers) {
-                            navigationHelper.notifyLightweightObservers(notifier, feature, notification);
+                            subscriptions.notifyLightweightObservers(notifier, feature, notification);
                         }
                     } else if (oNotifier instanceof Resource) {
                         if (notification.getFeatureID(Resource.class) == Resource.RESOURCE__IS_LOADED) {

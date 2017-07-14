@@ -24,6 +24,7 @@ import org.eclipse.viatra.addon.viewers.runtime.notation.NotationFactory;
 import org.eclipse.viatra.addon.viewers.runtime.notation.NotationModel;
 import org.eclipse.viatra.query.runtime.api.IQuerySpecification;
 import org.eclipse.viatra.query.runtime.api.ViatraQueryEngine;
+import org.eclipse.viatra.query.runtime.base.api.IEMFBaseIndex;
 import org.eclipse.viatra.query.runtime.base.api.NavigationHelper;
 import org.eclipse.viatra.query.runtime.base.exception.ViatraBaseException;
 import org.eclipse.viatra.query.runtime.emf.EMFScope;
@@ -116,7 +117,7 @@ public abstract class ViewerDataModel {
     private Resource addNotationResource() throws ViatraQueryException, ViatraBaseException {
         ResourceSet resourceSet = new ResourceSetImpl();
         Resource resource = resourceSet.createResource(URI.createURI(getNotationResourceId()));
-        NavigationHelper helper = EMFScope.extractUnderlyingEMFIndex(engine);
+        IEMFBaseIndex<?> helper = EMFScope.extractUnderlyingEMFBaseIndex(engine);
         helper.addRoot(resourceSet);
         
         return resource;

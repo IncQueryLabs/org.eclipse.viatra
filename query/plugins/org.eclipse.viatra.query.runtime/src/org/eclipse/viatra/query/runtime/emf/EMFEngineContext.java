@@ -17,8 +17,9 @@ import org.eclipse.viatra.query.runtime.api.ViatraQueryEngine;
 import org.eclipse.viatra.query.runtime.api.scope.IBaseIndex;
 import org.eclipse.viatra.query.runtime.api.scope.IEngineContext;
 import org.eclipse.viatra.query.runtime.api.scope.IIndexingErrorListener;
+import org.eclipse.viatra.query.runtime.base.api.IEMFBaseIndex;
+import org.eclipse.viatra.query.runtime.base.api.ISurrogateServiceFactory;
 import org.eclipse.viatra.query.runtime.base.api.ViatraBaseFactory;
-import org.eclipse.viatra.query.runtime.base.api.NavigationHelper;
 import org.eclipse.viatra.query.runtime.base.exception.ViatraBaseException;
 import org.eclipse.viatra.query.runtime.exception.ViatraQueryException;
 import org.eclipse.viatra.query.runtime.matchers.context.IQueryRuntimeContext;
@@ -28,33 +29,54 @@ import org.eclipse.viatra.query.runtime.matchers.context.IQueryRuntimeContext;
  * @author Bergmann Gabor
  *
  */
-class EMFEngineContext implements IEngineContext {
+class EMFEngineContext<Surrogate> implements IEngineContext {
 
     private final EMFScope emfScope;
+    private ISurrogateServiceFactory<Surrogate> surrogateServiceFactory;
     ViatraQueryEngine engine;
     Logger logger;
-    NavigationHelper navHelper;
-    IBaseIndex baseIndex;
+    IEMFBaseIndex<Surrogate> baseIndex;
+    IBaseIndex baseIndexWrapper;
     IIndexingErrorListener taintListener;
-    private EMFQueryRuntimeContext runtimeContext;
+    private EMFQueryRuntimeContext<Surrogate> runtimeContext;
     
-    public EMFEngineContext(EMFScope emfScope, ViatraQueryEngine engine, IIndexingErrorListener taintListener, Logger logger) {
+    
+    public static <Surrogate> EMFEngineContext<Surrogate> create(
+            EMFScope emfScope, 
+            ISurrogateServiceFactory<Surrogate> surrogateServiceFactory, 
+            ViatraQueryEngine engine, 
+            IIndexingErrorListener taintListener, 
+            Logger logger) 
+    {
+        return new EMFEngineContext<Surrogate>(emfScope, surrogateServiceFactory, engine, taintListener, logger);
+    }
+    
+    public EMFEngineContext(
+            EMFScope emfScope, 
+            ISurrogateServiceFactory<Surrogate> surrogateServiceFactory, 
+            ViatraQueryEngine engine, 
+            IIndexingErrorListener taintListener, 
+            Logger logger) 
+    {
         this.emfScope = emfScope;
+        this.surrogateServiceFactory = surrogateServiceFactory;
         this.engine = engine;
         this.logger = logger;
         this.taintListener = taintListener;
     }
     
-    public NavigationHelper getNavHelper() throws ViatraQueryException {
-        return getNavHelper(true);
+    public IEMFBaseIndex<Surrogate> getBaseIndexCore() throws ViatraQueryException {
+        return getBaseIndexCore(true);
     }
-    private NavigationHelper getNavHelper(boolean ensureInitialized) throws ViatraQueryException {
-        if (navHelper == null) {
+    private IEMFBaseIndex<Surrogate> getBaseIndexCore(boolean ensureInitialized) throws ViatraQueryException {
+        if (baseIndex == null) {
             try {
                 // sync to avoid crazy compiler reordering which would matter if derived features use VIATRA and call this
                 // reentrantly
                 synchronized (this) {
-                    navHelper = ViatraBaseFactory.getInstance().createNavigationHelper(null, this.emfScope.getOptions(),
+                    baseIndex = ViatraBaseFactory.getInstance().createBaseIndex(
+                            surrogateServiceFactory, 
+                            this.emfScope.getOptions(),
                             logger);
                     getBaseIndex().addIndexingErrorListener(taintListener);
                 }
@@ -68,13 +90,13 @@ class EMFEngineContext implements IEngineContext {
             }
 
         }
-        return navHelper;
+        return baseIndex;
     }
 
     private void ensureIndexLoaded() throws ViatraQueryException {
         try {
             for (Notifier scopeRoot : this.emfScope.getScopeRoots()) {
-                navHelper.addRoot(scopeRoot);
+                baseIndex.addRoot(scopeRoot);
             }
         } catch (ViatraBaseException e) {
             throw new ViatraQueryException("Could not initialize VIATRA Base Index",
@@ -84,12 +106,12 @@ class EMFEngineContext implements IEngineContext {
 
     @Override
     public IQueryRuntimeContext getQueryRuntimeContext() throws ViatraQueryException {
-        NavigationHelper nh = getNavHelper(false);
+        IEMFBaseIndex<Surrogate> nh = getBaseIndexCore(false);
         if (runtimeContext == null) {
             runtimeContext = 
                     emfScope.getOptions().isDynamicEMFMode() ?
-                     new DynamicEMFQueryRuntimeContext(nh, logger, emfScope) :
-                     new EMFQueryRuntimeContext(nh, logger, emfScope);
+                     new DynamicEMFQueryRuntimeContext<Surrogate>(nh, logger, emfScope) :
+                     new EMFQueryRuntimeContext<Surrogate>(nh, logger, emfScope);
                      
              ensureIndexLoaded();
         }
@@ -100,21 +122,21 @@ class EMFEngineContext implements IEngineContext {
     @Override
     public void dispose() {
         if (runtimeContext != null) runtimeContext.dispose();
-        if (navHelper != null) navHelper.dispose();
+        if (baseIndex != null) baseIndex.dispose();
         
-        this.baseIndex = null;
+        this.baseIndexWrapper = null;
         this.engine = null;
         this.logger = null;
-        this.navHelper = null;
+        this.baseIndex = null;
     }
     
     
     @Override
     public IBaseIndex getBaseIndex() throws ViatraQueryException {
-        if (baseIndex == null) {
-            final NavigationHelper navigationHelper = getNavHelper();
-            baseIndex = new EMFBaseIndexWrapper(navigationHelper);
+        if (baseIndexWrapper == null) {
+            final IEMFBaseIndex<Surrogate> navigationHelper = getBaseIndexCore();
+            baseIndexWrapper = new EMFBaseIndexWrapper<Surrogate>(navigationHelper);
         }
-        return baseIndex;
+        return baseIndexWrapper;
     }
 }

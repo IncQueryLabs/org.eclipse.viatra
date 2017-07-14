@@ -13,8 +13,10 @@ package org.eclipse.viatra.query.runtime.base.api;
 import org.eclipse.viatra.query.runtime.base.api.filters.IBaseIndexFeatureFilter;
 import org.eclipse.viatra.query.runtime.base.api.filters.IBaseIndexObjectFilter;
 import org.eclipse.viatra.query.runtime.base.api.filters.IBaseIndexResourceFilter;
+import org.eclipse.viatra.query.runtime.base.core.NopEObjectSurrogateService;
 
 import com.google.common.base.Objects;
+import com.google.common.base.Preconditions;
 
 /**
  * The base index options indicate how the indices are built.
@@ -83,6 +85,10 @@ public class BaseIndexOptions {
      * @since 1.5
      */
     protected IBaseIndexFeatureFilter featureFilterConfiguration;
+    /**
+     * @since 1.7
+     */
+    protected ISurrogateServiceFactory<?> surrogateServiceFactory = NopEObjectSurrogateService.FACTORY;
     
     /**
      * If strict notification mode is turned on, errors related to inconsistent notifications, e.g. duplicate deletions
@@ -193,6 +199,31 @@ public class BaseIndexOptions {
         result.featureFilterConfiguration = filter;
         return result;
     }
+    
+    
+    /**
+     * @return the selected surrogate service factory, or the default {@link NopEObjectSurrogateService} if not set;
+     * never returns null
+     * @since 1.7
+     */
+    public ISurrogateServiceFactory<?> getSurrogateServiceFactory() {
+        return surrogateServiceFactory;
+    }
+    
+    
+    /**
+     * Returns a copy of the configuration with a specified surrogate service factory.
+     * 
+     * @param surrogateServiceFactory the new factory (must not be null)
+     * 
+     * @since 1.7
+     */
+    public BaseIndexOptions withSurrogateServiceFactory(ISurrogateServiceFactory<?> surrogateServiceFactory) {
+        Preconditions.checkNotNull(surrogateServiceFactory);
+        BaseIndexOptions result = copy();
+        result.surrogateServiceFactory = surrogateServiceFactory;
+        return result;
+    }
 
     /**
      * @return the selected feature filter, or null if not set 
@@ -296,6 +327,7 @@ public class BaseIndexOptions {
         baseIndexOptions.resourceFilterConfiguration = this.resourceFilterConfiguration;
         baseIndexOptions.featureFilterConfiguration = this.featureFilterConfiguration;
         baseIndexOptions.strictNotificationMode = this.strictNotificationMode;
+        baseIndexOptions.surrogateServiceFactory = this.surrogateServiceFactory;
         return baseIndexOptions;
     }
 
@@ -303,7 +335,7 @@ public class BaseIndexOptions {
     public int hashCode() {
         return Objects.hashCode(dynamicEMFMode, notifierFilterConfiguration, resourceFilterConfiguration,
                 featureFilterConfiguration, traverseOnlyWellBehavingDerivedFeatures, wildcardMode, strictNotificationMode,
-                danglingFreeAssumption);
+                danglingFreeAssumption, surrogateServiceFactory);
     }
 
     @Override
@@ -348,6 +380,7 @@ public class BaseIndexOptions {
         if (strictNotificationMode != other.strictNotificationMode) {
             return false;
         }
+        if (!Objects.equal(surrogateServiceFactory, other.surrogateServiceFactory)) return false;
         return true;
     }
     
@@ -363,6 +396,7 @@ public class BaseIndexOptions {
         appendModifier(sb, notifierFilterConfiguration, null, "notifierFilter=");
         appendModifier(sb, resourceFilterConfiguration, null, "resourceFilter=");
         appendModifier(sb, featureFilterConfiguration, null, "featureFilterConfiguration=");
+        appendModifier(sb, surrogateServiceFactory, NopEObjectSurrogateService.FACTORY, "surrogateServiceFactory=");
         final String result = sb.toString();
         return result.isEmpty() ? "defaults" : result;
     }

@@ -27,7 +27,7 @@ import org.eclipse.emf.ecore.EStructuralFeature;
 import org.eclipse.emf.ecore.ETypedElement;
 import org.eclipse.emf.ecore.EcorePackage;
 import org.eclipse.viatra.query.runtime.base.api.BaseIndexOptions;
-import org.eclipse.viatra.query.runtime.base.api.InstanceListener;
+import org.eclipse.viatra.query.runtime.base.api.InstanceSurrogateListener;
 import org.eclipse.viatra.query.runtime.base.exception.ViatraBaseException;
 
 import com.google.common.base.Preconditions;
@@ -40,16 +40,16 @@ import com.google.common.collect.Table;
  * 
  * @author Gabor Bergmann
  */
-public class EMFBaseIndexMetaStore {
+public class EMFBaseIndexMetaStore<Surrogate> {
     
     private static final EClass EOBJECT_CLASS = EcorePackage.eINSTANCE.getEObject();
     private final boolean isDynamicModel;
-    private NavigationHelperImpl navigationHelper;
+    private NavigationHelperImpl<Surrogate> navigationHelper;
     
     /**
      * 
      */
-    public EMFBaseIndexMetaStore(final NavigationHelperImpl navigationHelper) {
+    public EMFBaseIndexMetaStore(final NavigationHelperImpl<Surrogate> navigationHelper) {
         this.navigationHelper = navigationHelper;
         final BaseIndexOptions options = navigationHelper.getBaseIndexOptions();
         this.isDynamicModel = options.isDynamicEMFMode();
@@ -308,12 +308,12 @@ public class EMFBaseIndexMetaStore {
         if (navigationHelper.directlyObservedClasses.containsKey(superClassKey)) {
             navigationHelper.getAllObservedClassesInternal().put(subClassKey, navigationHelper.directlyObservedClasses.get(superClassKey));
         }
-        final Table<Object, InstanceListener, Set<EClass>> instanceListeners = navigationHelper.peekInstanceListeners();
+        final Table<Object, InstanceSurrogateListener<Surrogate>, Set<EClass>> instanceListeners = navigationHelper.subscriptions.peekInstanceSurrogateListeners();
         if (instanceListeners != null) { // table already constructed
-            for (final Entry<InstanceListener, Set<EClass>> entry : instanceListeners.row(superClassKey).entrySet()) {
-                final InstanceListener listener = entry.getKey();
+            for (final Entry<InstanceSurrogateListener<Surrogate>, Set<EClass>> entry : instanceListeners.row(superClassKey).entrySet()) {
+                final InstanceSurrogateListener<Surrogate> listener = entry.getKey();
                 for (final EClass subscriptionType : entry.getValue()) {
-                    navigationHelper.addInstanceListenerInternal(listener, subscriptionType, subClassKey);
+                    navigationHelper.subscriptions.addInstanceSurrogateListenerInternal(listener, subscriptionType, subClassKey);
                 }
             }
         }

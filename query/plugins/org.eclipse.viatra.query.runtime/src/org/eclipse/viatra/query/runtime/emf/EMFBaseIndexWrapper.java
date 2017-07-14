@@ -23,41 +23,44 @@ import org.eclipse.viatra.query.runtime.api.scope.IIndexingErrorListener;
 import org.eclipse.viatra.query.runtime.api.scope.IInstanceObserver;
 import org.eclipse.viatra.query.runtime.api.scope.ViatraBaseIndexChangeListener;
 import org.eclipse.viatra.query.runtime.base.api.EMFBaseIndexChangeListener;
+import org.eclipse.viatra.query.runtime.base.api.IEMFBaseIndex;
 import org.eclipse.viatra.query.runtime.base.api.IEMFIndexingErrorListener;
 import org.eclipse.viatra.query.runtime.base.api.LightweightEObjectObserver;
-import org.eclipse.viatra.query.runtime.base.api.NavigationHelper;
 
 /**
  * Wraps the EMF base index into the IBaseIndex interface.
  * @author Bergmann Gabor
+ * @noinstantiate This class is not intended to be instantiated by clients.
  *
  */
-public class EMFBaseIndexWrapper implements IBaseIndex {
+public class EMFBaseIndexWrapper<Surrogate> implements IBaseIndex {
 
-    private final NavigationHelper navigationHelper;
+    private final IEMFBaseIndex<Surrogate> baseIndex;
     /**
      * @return the underlying index object
+     * @since 1.7
      */
-    public NavigationHelper getNavigationHelper() {
-        return navigationHelper;
+    public IEMFBaseIndex<Surrogate> getWrapped() {
+        return baseIndex;
     }
 
     /**
      * @param navigationHelper
+     * @since 1.7
      */
-    public EMFBaseIndexWrapper(NavigationHelper navigationHelper) {
-        this.navigationHelper = navigationHelper;
+    public EMFBaseIndexWrapper(IEMFBaseIndex<Surrogate> navigationHelper) {
+        this.baseIndex = navigationHelper;
     }
 
     @Override
     public void resampleDerivedFeatures() {
-        navigationHelper.resampleDerivedFeatures();
+        baseIndex.resampleDerivedFeatures();
     }
 
 
     @Override
     public <V> V coalesceTraversals(Callable<V> callable) throws InvocationTargetException {
-        return navigationHelper.coalesceTraversals(callable);
+        return baseIndex.coalesceTraversals(callable);
     }
 
     Map<IIndexingErrorListener, IEMFIndexingErrorListener> indexErrorListeners =
@@ -76,12 +79,12 @@ public class EMFBaseIndexWrapper implements IBaseIndex {
             }
         };
         indexErrorListeners.put(listener, emfListener);
-        return navigationHelper.addIndexingErrorListener(emfListener);
+        return baseIndex.addIndexingErrorListener(emfListener);
     }
     @Override
     public boolean removeIndexingErrorListener(IIndexingErrorListener listener) {
         if (!indexErrorListeners.containsKey(listener)) return false;
-        return navigationHelper.removeIndexingErrorListener(indexErrorListeners.remove(listener));
+        return baseIndex.removeIndexingErrorListener(indexErrorListeners.remove(listener));
     }
     
     
@@ -101,13 +104,13 @@ public class EMFBaseIndexWrapper implements IBaseIndex {
             }
         };
         indexChangeListeners.put(listener, emfListener);
-        navigationHelper.addBaseIndexChangeListener(emfListener);
+        baseIndex.addBaseIndexChangeListener(emfListener);
     }
     @Override
     public void removeBaseIndexChangeListener(ViatraBaseIndexChangeListener listener) {
         final EMFBaseIndexChangeListener cListener = indexChangeListeners.remove(listener);
         if (cListener != null) 
-            navigationHelper.removeBaseIndexChangeListener(cListener);
+            baseIndex.removeBaseIndexChangeListener(cListener);
     }
 
     Map<IInstanceObserver, EObjectObserver> instanceObservers = 
@@ -122,7 +125,7 @@ public class EMFBaseIndexWrapper implements IBaseIndex {
                 instanceObservers.put(observer, emfObserver);
             }
             boolean success = 
-                    navigationHelper.addLightweightEObjectObserver(emfObserver, (EObject) observedObject);
+                    baseIndex.addLightweightEObjectObserver(emfObserver, (EObject) observedObject);
             if (success) emfObserver.usageCount++;
             return success;
         } else return false;
@@ -135,7 +138,7 @@ public class EMFBaseIndexWrapper implements IBaseIndex {
             if (emfObserver == null)
                 return false;
             boolean success = 
-                    navigationHelper.removeLightweightEObjectObserver(emfObserver, (EObject)observedObject);
+                    baseIndex.removeLightweightEObjectObserver(emfObserver, (EObject)observedObject);
             if (success) 
                 if (0 == --emfObserver.usageCount)
                     instanceObservers.remove(observer);

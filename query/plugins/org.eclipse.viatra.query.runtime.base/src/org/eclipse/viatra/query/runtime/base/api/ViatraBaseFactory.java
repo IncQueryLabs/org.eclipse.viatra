@@ -17,9 +17,11 @@ import org.apache.log4j.Logger;
 import org.eclipse.emf.common.notify.Notifier;
 import org.eclipse.emf.ecore.EClass;
 import org.eclipse.emf.ecore.EDataType;
+import org.eclipse.emf.ecore.EObject;
 import org.eclipse.emf.ecore.EReference;
 import org.eclipse.emf.ecore.EStructuralFeature;
 import org.eclipse.viatra.query.runtime.base.core.NavigationHelperImpl;
+import org.eclipse.viatra.query.runtime.base.core.NopEObjectSurrogateService;
 import org.eclipse.viatra.query.runtime.base.core.TransitiveClosureHelperImpl;
 import org.eclipse.viatra.query.runtime.base.exception.ViatraBaseException;
 
@@ -134,14 +136,42 @@ public class ViatraBaseFactory {
      *            NavigationHelper; if null, the default logger for {@link NavigationHelper} is used.
      * @return the NavigationHelper instance
      */
-    public NavigationHelper createNavigationHelper(Notifier emfRoot, BaseIndexOptions options, Logger logger)
+    public <Surrogate> NavigationHelper createNavigationHelper(Notifier emfRoot, BaseIndexOptions options, Logger logger)
             throws ViatraBaseException {
         Logger l = logger;
         if (l == null)
             l = Logger.getLogger(NavigationHelper.class);
-        return new NavigationHelperImpl(emfRoot, options, l);
+        return new NavigationHelperImpl<Surrogate>(emfRoot, options, (ISurrogateServiceFactory<Surrogate>) options.surrogateServiceFactory, l);
     }
     
+    /**
+     * The method creates an {@link IEMFBaseIndex} index to which an EMF root can be added later. 
+     * A new instance will be created on every call.
+     * <p>
+     * For end users, we recommend {@link #createNavigationHelper(Notifier, BaseIndexOptions, Logger)} instead.
+     * <p>
+     * For details of base index options including wildcard and dynamic EMF mode, see {@link BaseIndexOptions}.
+     *
+     * @see IEMFBaseIndex
+     * 
+     * @param options the options used by the index 
+     * @param logger
+     *            the log output where errors will be logged if encountered during the operation of the
+     *            base index; if null, the default logger for {@link NavigationHelper} is used.
+     * @return the IEMFBaseIndex instance
+     * @since 1.7
+     */
+    public <Surrogate> IEMFBaseIndex<Surrogate> createBaseIndex(
+            ISurrogateServiceFactory<Surrogate> surrogateFactory, 
+            BaseIndexOptions options, 
+            Logger logger) throws ViatraBaseException 
+    {
+        Logger l = logger;
+        if (l == null)
+            l = Logger.getLogger(IEMFBaseIndex.class);
+        return new NavigationHelperImpl<Surrogate>(null, options, surrogateFactory, l);
+    }
+   
     
 
     /**

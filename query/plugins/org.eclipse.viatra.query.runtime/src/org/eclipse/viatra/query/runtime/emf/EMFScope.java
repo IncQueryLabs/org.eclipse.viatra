@@ -24,6 +24,7 @@ import org.eclipse.viatra.query.runtime.api.scope.IEngineContext;
 import org.eclipse.viatra.query.runtime.api.scope.IIndexingErrorListener;
 import org.eclipse.viatra.query.runtime.api.scope.QueryScope;
 import org.eclipse.viatra.query.runtime.base.api.BaseIndexOptions;
+import org.eclipse.viatra.query.runtime.base.api.IEMFBaseIndex;
 import org.eclipse.viatra.query.runtime.base.api.NavigationHelper;
 import org.eclipse.viatra.query.runtime.exception.ViatraQueryException;
 
@@ -162,7 +163,7 @@ public class EMFScope extends QueryScope {
 
     @Override
     protected IEngineContext createEngineContext(ViatraQueryEngine engine, IIndexingErrorListener errorListener, Logger logger) {
-        return new EMFEngineContext(this, engine, errorListener, logger);
+        return EMFEngineContext.create(this, options.getSurrogateServiceFactory(), engine, errorListener, logger);
     }
 
     /**
@@ -171,11 +172,23 @@ public class EMFScope extends QueryScope {
      * @param engine an already existing VIATRA Query engine instantiated on an EMFScope
      * @return the underlying EMF base index that indexes the contents of the EMF model
      * @throws ViatraQueryException if base index initialization fails
+     * @deprecated use {@link #extractUnderlyingEMFBaseIndex(ViatraQueryEngine)} instead
      */
     public static NavigationHelper extractUnderlyingEMFIndex(ViatraQueryEngine engine) throws ViatraQueryException {
+        return extractUnderlyingEMFBaseIndex(engine).getNavigationHelper();
+    }
+    /**
+     * Provides access to the underlying EMF model index ({@link IEMFBaseIndex}) from a VIATRA Query engine instantiated on an EMFScope
+     * 
+     * @param engine an already existing VIATRA Query engine instantiated on an EMFScope
+     * @return the underlying EMF base index that indexes the contents of the EMF model
+     * @throws ViatraQueryException if base index initialization fails
+     * @since 1.7
+     */
+    public static IEMFBaseIndex<?> extractUnderlyingEMFBaseIndex(ViatraQueryEngine engine) throws ViatraQueryException {
         final QueryScope scope = engine.getScope();
          if (scope instanceof EMFScope)
-             return ((EMFBaseIndexWrapper)AdvancedViatraQueryEngine.from(engine).getBaseIndex()).getNavigationHelper();
+             return ((EMFBaseIndexWrapper<?>)AdvancedViatraQueryEngine.from(engine).getBaseIndex()).getWrapped();
          else throw new IllegalArgumentException("Cannot extract EMF base index from VIATRA Query engine instantiated on non-EMF scope " + scope);
     }
     

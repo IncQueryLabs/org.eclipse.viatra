@@ -18,6 +18,7 @@ import org.eclipse.emf.ecore.EReference;
 import org.eclipse.emf.ecore.EStructuralFeature;
 import org.eclipse.emf.ecore.resource.Resource;
 import org.eclipse.viatra.query.runtime.api.ViatraQueryEngine;
+import org.eclipse.viatra.query.runtime.base.api.IEMFBaseIndex;
 import org.eclipse.viatra.query.runtime.base.api.NavigationHelper;
 import org.eclipse.viatra.query.runtime.emf.EMFScope;
 import org.eclipse.viatra.query.runtime.exception.ViatraQueryException;
@@ -35,16 +36,19 @@ import com.google.common.collect.ImmutableList;
 public abstract class AbstractModelManipulations implements IModelManipulations {
 
     protected final ViatraQueryEngine engine;
-    private NavigationHelper baseEMFIndex;
+    private IEMFBaseIndex<?> baseEMFIndex;
 
     public AbstractModelManipulations(ViatraQueryEngine engine) {
         super();
         this.engine = engine;
     }
 
-    protected NavigationHelper getBaseEMFIndex() throws ViatraQueryException {
+    /**
+     * @since 1.7
+     */
+    protected IEMFBaseIndex<?> getBaseEMFIndex() throws ViatraQueryException {
         if (baseEMFIndex == null) {
-            baseEMFIndex = EMFScope.extractUnderlyingEMFIndex(engine);
+            baseEMFIndex = EMFScope.extractUnderlyingEMFBaseIndex(engine);
         }
         return baseEMFIndex;
     }
