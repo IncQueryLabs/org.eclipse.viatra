@@ -324,6 +324,13 @@ public class NavigationHelperImpl implements NavigationHelper {
     }
 
     @Override
+    public boolean isInstanceOfDatatype(Object value, EDataType type) {
+        Object typeKey = toKey(type);
+        Map<Object, Integer> valMap = instanceStore.getDataTypeMap(typeKey);
+        return valMap != null && valMap.containsKey(value);
+    }
+
+    @Override
     public Set<Setting> findByAttributeValue(Object value_) {
         Object value = toCanonicalValueRepresentation(value_);
         Set<Setting> retSet = new HashSet<Setting>();
@@ -499,6 +506,13 @@ public class NavigationHelperImpl implements NavigationHelper {
     }
 
     @Override
+    public boolean isFeatureInstance(EObject source, Object target, EStructuralFeature _feature) {
+        Object feature = toKey(_feature);
+        final Map<Object, Collection<EObject>> valMap = instanceStore.getValueToFeatureToHolderMap().column(feature);
+        return valMap != null && valMap.containsKey(target) && valMap.get(target).contains(source);
+    }
+
+    @Override
     public Set<EObject> getDirectInstances(EClass type) {
         Object typeKey = toKey(type);
         Set<EObject> valSet = instanceStore.getInstanceSet(typeKey);
@@ -554,6 +568,22 @@ public class NavigationHelperImpl implements NavigationHelper {
                     
         Set<Object> superTypes = metaStore.getSuperTypeMap().get(typeKey);
         return superTypes.contains(candidateTypeKey);            
+    }
+    
+    @Override
+    public boolean isInstanceOfScoped(EObject object, EClass clazz) {
+        Object typeKey = toKey(clazz);
+        Set<Object> subTypes = metaStore.getSubTypeMap().get(typeKey);
+        if (subTypes != null) {
+            for (Object subTypeKey : subTypes) {
+                final Set<EObject> instances = instanceStore.getInstanceSet(subTypeKey);
+                if (instances != null && instances.contains(object)) {
+                    return true;
+                }
+            }
+        }
+        final Set<EObject> instances = instanceStore.getInstanceSet(typeKey);
+        return instances != null && instances.contains(object);
     }
 
     @Override

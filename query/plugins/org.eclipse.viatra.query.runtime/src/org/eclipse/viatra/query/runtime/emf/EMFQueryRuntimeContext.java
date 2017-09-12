@@ -190,28 +190,28 @@ public class EMFQueryRuntimeContext extends AbstractQueryRuntimeContext {
         ensureValidKey(key);
         if (key instanceof JavaTransitiveInstancesKey) {
             Class<?> instanceClass = forceGetWrapperInstanceClass((JavaTransitiveInstancesKey) key);
-            if (instanceClass != null)
-                return instanceClass.isInstance(getFromSeed(seed, 0));
-            else
-                return false;
+            return instanceClass != null && instanceClass.isInstance(getFromSeed(seed, 0));
         } else if (key instanceof EClassUnscopedTransitiveInstancesKey) {
             EClass emfKey = ((EClassUnscopedTransitiveInstancesKey) key).getEmfKey();
             Object candidateInstance = getFromSeed(seed, 0);
-            if (candidateInstance instanceof EObject) {
-                return baseIndex.isInstanceOfUnscoped((EObject) candidateInstance, emfKey);
-            } else return false;            
+            return candidateInstance instanceof EObject
+                    && baseIndex.isInstanceOfUnscoped((EObject) candidateInstance, emfKey);
         } else {
             ensureIndexed(key);
             if (key instanceof EClassTransitiveInstancesKey) {
                 EClass eClass = ((EClassTransitiveInstancesKey) key).getEmfKey();
                 // instance check not enough to satisfy scoping, must lookup from index
-                return baseIndex.getAllInstances(eClass).contains(getFromSeed(seed, 0));
+                Object candidateInstance = getFromSeed(seed, 0);
+                return candidateInstance instanceof EObject 
+                        && baseIndex.isInstanceOfScoped((EObject) candidateInstance, eClass);
             } else if (key instanceof EDataTypeInSlotsKey) {
                 EDataType dataType = ((EDataTypeInSlotsKey) key).getEmfKey();
-                return baseIndex.getDataTypeInstances(dataType).contains(getFromSeed(seed, 0));
+                return baseIndex.isInstanceOfDatatype(getFromSeed(seed, 0), dataType);
             } else if (key instanceof EStructuralFeatureInstancesKey) {
                 EStructuralFeature feature = ((EStructuralFeatureInstancesKey) key).getEmfKey();
-                return baseIndex.findByFeatureValue(getFromSeed(seed, 1), feature).contains(getFromSeed(seed, 0));
+                Object sourceCandidate = getFromSeed(seed, 0);
+                return sourceCandidate instanceof EObject 
+                        && baseIndex.isFeatureInstance((EObject) sourceCandidate, getFromSeed(seed, 1), feature);
             } else {
                 illegalInputKey(key);
                 return false;

@@ -201,6 +201,20 @@ public interface NavigationHelper {
      * @return the set of all attribute values found in the model that are of the given data type
      */
     public Set<Object> getDataTypeInstances(EDataType type);
+
+    /**
+     * Returns whether an object is a set of instance for the given {@link EDataType} that can be found in the model.
+     * <p>
+     * <strong>Precondition:</strong> Result will be true only if either (a) the EDataType has already been registered
+     * using {@link #registerEDataTypes(Set)}, or (b) running in <em>wildcard mode</em> (see
+     * {@link #isInWildcardMode()}).
+     * 
+     * @param value a non-null value to decide whether it is available as an EDataType instance
+     * @param type a non-null EDataType
+     * @return true, if a corresponding instance was found
+     * @since 1.7
+     */
+    public boolean isInstanceOfDatatype(Object value, EDataType type);
     
     /**
      * Find all {@link EObject}s that are the target of the EReference <code>reference</code> from the given
@@ -256,6 +270,20 @@ public interface NavigationHelper {
      * @return the map from source {@link EObject}s to the value(s) of the given feature
      */
     public Map<EObject, Set<Object>> getFeatureInstances(EStructuralFeature feature);
+    
+    /**
+     * Decides whether the given non-null source and target objects are connected via a specific, indexed EStructuralFeature instance.
+     * 
+     * <p>
+     * Unset / null-valued features are not indexed, and will not be included in the results.
+     * 
+     * <p>
+     * <strong>Precondition:</strong> Result will be true only if either (a) the feature has already been
+     * registered, or (b) running in <em>wildcard mode</em> (see
+     * {@link #isInWildcardMode()}).
+     * @since 1.7
+     */
+    public boolean isFeatureInstance(EObject source, Object target, EStructuralFeature feature);
     
     /**
      * For a given {@link EObject} <code>target</code>, find each {@link EReference} and source {@link EObject} 
@@ -358,6 +386,16 @@ public interface NavigationHelper {
      * @since 1.6
      */
     public boolean isInstanceOfUnscoped(EObject object, EClass clazz);
+    
+    /**
+     * Checks whether the given {@link EObject} is an instance of the given {@link EClass}. 
+     * This includes instances of subclasses.
+     * <p> Special note: this method does check whether the object is indexed in the scope, 
+     * and will return false for out-of-scope objects as well (as long as they are instances of the class). 
+     * <p> The given class does have to be indexed. 
+     * @since 1.7
+     */
+    public boolean isInstanceOfScoped(EObject object, EClass clazz);
 
     /**
      * Get the total number of instances of the given {@link EClass} and all of its subclasses.
@@ -385,6 +423,7 @@ public interface NavigationHelper {
      */
     public Set<EObject> findByFeatureValue(Object value, EStructuralFeature feature);
 
+//    public boolean isFeatureIndexedWithValues(ES)
     /**
      * Returns those host {@link EObject}s that have a non-null value for the given feature 
      * (at least one, in case of multi-valued references).
