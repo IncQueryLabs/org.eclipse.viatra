@@ -321,7 +321,9 @@ public abstract class AbstractLocalSearchResultProvider implements IQueryResultP
             @Override
             public Void call() throws Exception {
                 for(IInputKey key : keys){
-                    qrc.ensureIndexed(key, IndexingService.INSTANCES);
+                    if (key.isEnumerable()) {
+                        qrc.ensureIndexed(key, IndexingService.INSTANCES);
+                    }
                 }
                 return null;
             }
